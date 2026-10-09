@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Annke & Hikvision Bridge</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="logo-title">
+      <img src="icons/icon48.png" alt="Logo" width="24" height="24">
+      <h2>Camera Bridge</h2>
+    </div>
+    <span class="badge active" id="statusBadge">Active</span>
+  </div>
+
+  <div class="section status-box">
+    <div class="status-row">
+      <span>LocalService Emulation:</span>
+      <strong class="green">Enabled (Port 33686)</strong>
+    </div>
+    <div class="status-row">
+      <span>Decoder:</span>
+      <strong>WebCodecs (GPU)</strong>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Quick Actions</h3>
+    <button id="openViewerBtn" class="btn primary">Open Standalone Player</button>
+    <div class="btn-group">
+      <button id="snapBtn" class="btn secondary">Take Snapshot</button>
+      <button id="fullBtn" class="btn secondary">Toggle Fullscreen</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>Stream Settings</h3>
+    <label for="streamSelect">Default Channel Stream:</label>
+    <select id="streamSelect">
+      <option value="101">Channel 1 - Main Stream (High Def)</option>
+      <option value="102">Channel 1 - Sub Stream (Fast/Low Latency)</option>
+    </select>
+  </div>
+
+  <div class="footer">
+    <small>Replaces LocalServiceComponents.exe &bull; v1.0.5</small>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+body {
+  width: 320px;
+  margin: 0;
+  padding: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: #1a1e24;
+  color: #e4e7eb;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #2e3642;
+  padding-bottom: 8px;
+}
+
+.logo-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-title h2 {
+  font-size: 16px;
+  margin: 0;
+  font-weight: 600;
+  color: #fff;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-weight: bold;
+}
+
+.badge.active {
+  background: #10b981;
+  color: #fff;
+}
+
+.section {
+  margin-bottom: 12px;
+}
+
+.section h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin: 0 0 6px 0;
+  letter-spacing: 0.5px;
+}
+
+.status-box {
+  background: #242b35;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.status-row:last-child {
+  margin-bottom: 0;
+}
+
+.green {
+  color: #34d399;
+}
+
+.btn {
+  display: block;
+  width: 100%;
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.btn.primary {
+  background: #2563eb;
+  color: white;
+}
+
+.btn.primary:hover {
+  background: #1d4ed8;
+}
+
+.btn.secondary {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.btn.secondary:hover {
+  background: #475569;
+}
+
+.btn-group {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-group .btn {
+  flex: 1;
+}
+
+label {
+  font-size: 12px;
+  color: #cbd5e1;
+  display: block;
+  margin-bottom: 4px;
+}
+
+select {
+  width: 100%;
+  padding: 6px;
+  background: #242b35;
+  border: 1px solid #3b4554;
+  color: white;
+  border-radius: 4px;
+  font-size: 12px;
+  outline: none;
+}
+
+.footer {
+  text-align: center;
+  color: #64748b;
+  font-size: 10px;
+  margin-top: 10px;
+}

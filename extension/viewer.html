@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Annke / Hikvision Camera Player</title>
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar Control Panel -->
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="icons/icon48.png" width="28" height="28" alt="Logo">
+        <h1>Camera Player</h1>
+      </div>
+
+      <div class="card">
+        <h3>Connection</h3>
+        <div class="form-group">
+          <label>Camera IP / Host:</label>
+          <input type="text" id="camHost" placeholder="192.168.1.64" value="192.168.1.64">
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label>Port:</label>
+            <input type="number" id="camPort" value="80">
+          </div>
+          <div class="form-group flex-1">
+            <label>Protocol:</label>
+            <select id="camProto">
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label>Username:</label>
+            <input type="text" id="camUser" value="admin">
+          </div>
+          <div class="form-group flex-1">
+            <label>Password:</label>
+            <input type="password" id="camPass" placeholder="Password">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Stream Channel:</label>
+          <select id="camChannel">
+            <option value="101">Channel 1 - Main Stream (HD)</option>
+            <option value="102">Channel 1 - Sub Stream (Fast)</option>
+            <option value="201">Channel 2 - Main Stream</option>
+            <option value="202">Channel 2 - Sub Stream</option>
+          </select>
+        </div>
+        <button id="connectBtn" class="btn btn-primary">Connect & Play</button>
+      </div>
+
+      <!-- PTZ Controls -->
+      <div class="card">
+        <h3>PTZ & Lens</h3>
+        <div class="ptz-grid">
+          <div></div>
+          <button class="ptz-btn" id="ptzUp" title="Tilt Up">&#9650;</button>
+          <div></div>
+          <button class="ptz-btn" id="ptzLeft" title="Pan Left">&#9664;</button>
+          <button class="ptz-btn ptz-center" id="ptzStop" title="Stop">&#9632;</button>
+          <button class="ptz-btn" id="ptzRight" title="Pan Right">&#9654;</button>
+          <div></div>
+          <button class="ptz-btn" id="ptzDown" title="Tilt Down">&#9660;</button>
+          <div></div>
+        </div>
+        <div class="zoom-row">
+          <button class="btn btn-sm" id="ptzZoomIn">Zoom +</button>
+          <button class="btn btn-sm" id="ptzZoomOut">Zoom -</button>
+        </div>
+      </div>
+
+      <!-- Video Controls -->
+      <div class="card">
+        <h3>Controls</h3>
+        <button id="snapBtn" class="btn btn-secondary">Snapshot (JPEG)</button>
+        <button id="recBtn" class="btn btn-secondary">Start Recording</button>
+        <button id="fullBtn" class="btn btn-secondary">Fullscreen</button>
+        <button id="resetZoomBtn" class="btn btn-sm">Reset Digital Zoom</button>
+      </div>
+    </aside>
+
+    <!-- Main Viewport -->
+    <main class="viewport">
+      <div class="viewport-header">
+        <span class="status-indicator" id="streamStatus">Disconnected</span>
+        <div class="osd-info">
+          <span id="osdFps">0 FPS</span>
+          <span id="osdRes">Ready</span>
+        </div>
+      </div>
+
+      <div class="canvas-wrapper" id="canvasWrapper">
+        <canvas id="playerCanvas"></canvas>
+        <div class="watermark" id="placeholderOverlay">
+          <p>Enter camera details and click <strong>Connect & Play</strong></p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="h264-demuxer.js"></script>
+  <script src="stream-player.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>
