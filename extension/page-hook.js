@@ -243,6 +243,7 @@
         const actionsBar = document.createElement("div");
         actionsBar.className = "hik-wnd-actions";
         actionsBar.innerHTML = `
+          <button class="hik-act-btn hik-act-stream" title="Switch Stream Quality" data-act="stream-quality">HD</button>
           <button class="hik-act-btn" title="Snapshot" data-act="snap">📷</button>
           <button class="hik-act-btn" title="Toggle Full / Grid" data-act="zoom">⛶</button>
           <button class="hik-act-btn hik-act-close" title="Close Camera Stream" data-act="stop">✕</button>
@@ -254,7 +255,24 @@
           const target = e.target.closest("button");
           if (!target) return;
           const act = target.getAttribute("data-act");
-          if (act === "snap") {
+          if (act === "stream-quality") {
+            const entry = this.cells.get(wndIndex);
+            if (entry && entry.isPlaying && entry.channelId) {
+              const currentCh = parseInt(entry.channelId, 10);
+              const baseCh = Math.floor(currentCh / 100) * 100;
+              const isCurrentlySub = (currentCh % 10) === 2;
+              const newChannelId = String(baseCh + (isCurrentlySub ? 1 : 2));
+              console.log(`[Annke/Hikvision Bridge] Toggling stream quality for window ${wndIndex}: ${entry.channelId} -> ${newChannelId}`);
+
+              const loc = window.location;
+              const newUrl = `video://${loc.hostname}:554/${newChannelId}`;
+              this.startPlay(wndIndex, newUrl, {
+                channel: newChannelId,
+                origin: `${loc.protocol}//${loc.host}`,
+                streamType: isCurrentlySub ? "main" : "sub"
+              }, newChannelId);
+            }
+          } else if (act === "snap") {
             const entry = this.cells.get(wndIndex);
             if (entry && entry.player) {
               entry.player.downloadSnapshot(`camera_ch${entry.channelId || (wndIndex + 1)}_${Date.now()}.jpg`);
@@ -301,7 +319,7 @@
 
       player.onStats = (stats) => {
         if (entry.osdRes && entry.isPlaying) {
-          entry.osdRes.textContent = `${stats.width}x${stats.height}${stats.fps ? ` • ${stats.fps}fps` : ""}`;
+          entry.osdRes.textContent = `${stats.width}x${stats.height} [${stats.quality || "HD"}]${stats.fps ? ` • ${stats.fps}fps` : ""}`;
         }
       };
 
@@ -338,6 +356,19 @@
       } else {
         console.log(`[Annke/Hikvision Bridge] Maximizing window ${wndIndex}`);
         this.maximizedWndIndex = wndIndex;
+        // When maximizing to 100% full view, auto-upgrade to HD Main Stream if currently playing Sub Stream
+        const entry = this.cells.get(wndIndex);
+        if (entry && entry.isPlaying && entry.channelId && String(entry.channelId).endsWith("2")) {
+          const currentCh = parseInt(entry.channelId, 10);
+          const hdChannelId = String(Math.floor(currentCh / 100) * 100 + 1);
+          console.log(`[Annke/Hikvision Bridge] Maximized: Upgrading window ${wndIndex} to Full HD (${hdChannelId})`);
+          const loc = window.location;
+          this.startPlay(wndIndex, `video://${loc.hostname}:554/${hdChannelId}`, {
+            channel: hdChannelId,
+            origin: `${loc.protocol}//${loc.host}`,
+            streamType: "main"
+          }, hdChannelId);
+        }
       }
       this.updateLayout();
       this.selectWindow(wndIndex);
@@ -426,7 +457,19 @@
       if (entry.osdTitle) entry.osdTitle.textContent = chLabel;
       if (entry.osdBadge) entry.osdBadge.classList.add("live");
 
-      entry.player.play(streamUrl, options);
+      // Update stream quality button on the tile
+      const qualityBtn = entry.cellEl.querySelector("[data-act='stream-quality']");
+      const isSub = String(channelId).endsWith("2");
+      if (qualityBtn) {
+        qualityBtn.textContent = isSub ? "SD" : "HD";
+        qualityBtn.title = isSub ? "Current: SD (Fluent). Click to switch to HD (1080p Main Stream)" : "Current: HD (1080p). Click to switch to SD (Fluent Sub Stream)";
+      }
+
+      const streamOptions = Object.assign({}, options, {
+        streamType: isSub ? "sub" : "main"
+      });
+
+      entry.player.play(streamUrl, streamOptions);
       this.selectWindow(wndIndex);
     },
 
@@ -1164,6 +1207,18 @@
       .hik-act-btn.hik-act-close:hover {
         background: #f44336;
         border-color: #f44336;
+        color: #fff;
+      }
+      .hik-act-btn.hik-act-stream {
+        font-weight: 700;
+        font-size: 10px;
+        letter-spacing: 0.5px;
+        background: rgba(33, 150, 243, 0.25);
+        border-color: #2196F3;
+        color: #64b5f6;
+      }
+      .hik-act-btn.hik-act-stream:hover {
+        background: #2196F3;
         color: #fff;
       }
     `;

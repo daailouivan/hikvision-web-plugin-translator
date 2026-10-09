@@ -189,6 +189,7 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
       this.decoder = null;
       this.abortController = null;
       this.isPlaying = false;
+      this.sessionId = 0;
       this.codecConfigured = false;
       this.hasReceivedKeyFrame = false;
       this.frameIndex = 0;
@@ -464,12 +465,14 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
     renderImageBitmap(imgBitmap) {
       if (!this.canvas || !this.ctx) return;
 
+      let dimensionsChanged = false;
       if (
         this.canvas.width !== imgBitmap.width ||
         this.canvas.height !== imgBitmap.height
       ) {
         this.canvas.width = imgBitmap.width;
         this.canvas.height = imgBitmap.height;
+        dimensionsChanged = true;
         console.log(`[StreamPlayer] Canvas dimensions updated to: ${imgBitmap.width}x${imgBitmap.height}`);
       }
 
@@ -488,6 +491,14 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
 
       this.frameCount++;
       const now = performance.now();
+      if (dimensionsChanged && typeof this.onStats === "function") {
+        this.onStats({
+          width: this.canvas.width,
+          height: this.canvas.height,
+          fps: this.fps,
+          quality: this.currentQuality || "HD"
+        });
+      }
       if (now - this.lastFpsTime >= 1000) {
         this.fps = Math.round(
           (this.frameCount * 1000) / (now - this.lastFpsTime)
@@ -498,23 +509,31 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
           this.onStats({
             width: this.canvas.width,
             height: this.canvas.height,
-            fps: this.fps
+            fps: this.fps,
+            quality: this.currentQuality || "HD"
           });
         }
       }
     }
 
-    async startSnapshotStream(channel, origin, credentials) {
-      const snapUrl = `${origin}/ISAPI/ContentMgmt/StreamingProxy/channel/${channel}/Picture?snapShotImageType=JPEG`;
-      console.log(`[StreamPlayer] Launching live snapshot stream: ${snapUrl}`);
-      this.drawStatus(`Connecting to Camera Channel ${channel}...`);
+    async startSnapshotStream(channel, origin, credentials, streamType = "auto", session = this.sessionId) {
+      const isExplicitSub = streamType === "sub" || (channel.endsWith("2") && streamType !== "main");
+      const isMain = !isExplicitSub;
+
+      let snapUrl = `${origin}/ISAPI/ContentMgmt/StreamingProxy/channel/${channel}/Picture?snapShotImageType=JPEG`;
+      if (isMain) {
+        snapUrl += `&videoResolutionWidth=1920&videoResolutionHeight=1080`;
+      }
+      this.currentQuality = isMain ? "HD" : "SD";
+      console.log(`[StreamPlayer] Launching live ${this.currentQuality} snapshot stream for channel ${channel} (session ${session}): ${snapUrl}`);
+      this.drawStatus(`Connecting to Camera Channel ${channel} (${this.currentQuality})...`);
 
       let authState = null;
       let consecutiveErrors = 0;
       let isFetching = false;
 
       const fetchNextFrame = async () => {
-        if (!this.isPlaying || isFetching) return;
+        if (!this.isPlaying || this.sessionId !== session || isFetching) return;
         isFetching = true;
 
         const headers = {};
@@ -530,6 +549,8 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
             credentials: "include",
             signal: this.abortController ? this.abortController.signal : undefined
           });
+
+          if (!this.isPlaying || this.sessionId !== session) return;
 
           // Handle 401 challenge on initial connection or nonce expiration
           if (res.status === 401) {
@@ -547,12 +568,16 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
             }
           }
 
+          if (!this.isPlaying || this.sessionId !== session) return;
+
           if (res.ok) {
             consecutiveErrors = 0;
             const blob = await res.blob();
-            if (blob.size > 100 && this.isPlaying) {
+            if (blob.size > 100 && this.isPlaying && this.sessionId === session) {
               const imgBitmap = await createImageBitmap(blob);
-              this.renderImageBitmap(imgBitmap);
+              if (this.isPlaying && this.sessionId === session) {
+                this.renderImageBitmap(imgBitmap);
+              }
               imgBitmap.close();
             }
           } else {
@@ -561,7 +586,7 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
             if (res.status === 401) authState = null;
           }
         } catch (err) {
-          if (err.name === "AbortError" || !this.isPlaying) return;
+          if (err.name === "AbortError" || !this.isPlaying || this.sessionId !== session) return;
           console.warn("[StreamPlayer] Frame fetch error:", err.message);
           consecutiveErrors++;
         } finally {
@@ -571,10 +596,11 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
 
       // Continuous loop with adaptive pacing
       const streamLoop = async () => {
-        while (this.isPlaying) {
+        while (this.isPlaying && this.sessionId === session) {
           if (consecutiveErrors >= 8) {
             this.drawStatus(`Reconnecting Channel ${channel}...`);
             await new Promise(r => setTimeout(r, 1500));
+            if (!this.isPlaying || this.sessionId !== session) break;
             consecutiveErrors = 0;
             authState = null;
             continue;
@@ -592,6 +618,8 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
 
     async play(streamUrl, options = {}) {
       this.stop();
+      this.sessionId = (this.sessionId || 0) + 1;
+      const currentSession = this.sessionId;
       this.isPlaying = true;
       this.abortController = new AbortController();
       this.frameCount = 0;
@@ -622,11 +650,14 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
 
       const origin = options.origin || `${window.location.protocol}//${window.location.host}`;
 
+      const streamType = options.streamType || (channel.endsWith("2") ? "sub" : "main");
+
       // Launch high-speed snapshot streaming engine
-      this.startSnapshotStream(channel, origin, credentials);
+      this.startSnapshotStream(channel, origin, credentials, streamType, currentSession);
     }
 
     stop() {
+      this.sessionId = (this.sessionId || 0) + 1;
       this.isPlaying = false;
       if (this.abortController) {
         this.abortController.abort();

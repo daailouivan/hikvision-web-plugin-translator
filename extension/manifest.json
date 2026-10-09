@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hikvision & Annke Web Plugin Translator",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Cross-platform WebExtension translating legacy NPAPI / LocalServiceComponents into native HTML5 & WebCodecs for Hikvision and Annke cameras.",
   "permissions": [
     "storage",

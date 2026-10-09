@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome%20Extension-Manifest%20V3-brightgreen.svg)](extension/manifest.json)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-orange.svg)](#)
-[![Version](https://img.shields.io/badge/Release-v1.0.5-blue.svg)](#)
+[![Version](https://img.shields.io/badge/Release-v1.0.6-blue.svg)](#)
 
 A modern, cross-platform **Manifest V3 WebExtension** that seamlessly translates and virtualizes Hikvision & Annke's legacy plugin protocol (`LocalServiceComponents.exe` / `WebComponents.exe` / NPAPI) into native **HTML5 Canvas and WebCodecs** directly inside modern web browsers.
 
@@ -41,8 +41,9 @@ This extension completely eliminates the need for any native installer or backgr
 ┌────────────────────────────────────────────────────────┐
 │           In-DOM Multi-Window Grid Manager             │
 │  - Dynamic 1x1, 2x2, 3x3, 4x4 Grid Tiles               │
+│  - Full HD 1080p Main Stream (Channel 101/201/...)     │
 │  - Interactive Window Focus (Highlight & Route)        │
-│  - Hover Quick Actions (Snapshot, Zoom, Close)         │
+│  - Tile Quick Actions ([HD]/[SD], Snapshot, Zoom, Stop)│
 │  - WebCodecs / HTML5 Canvas Hardware Accelerated Video │
 └────────────────────────────────────────────────────────┘
 ```
@@ -53,6 +54,13 @@ This extension completely eliminates the need for any native installer or backgr
 
 - **🚀 100% Native In-Browser Execution**:
   No Wine, no external Python/Node daemons, no Windows virtual machines. Works seamlessly on Linux, macOS, ChromeOS, and Windows.
+- **📺 True Full HD (1080p) Main Stream**:
+  Resolves the NVR snapshot proxy scaler default limitation (`704x576`) by explicitly commanding full 1920x1080 parameters for Main Stream channels (`101`, `201`, etc.), delivering razor-sharp video feeds.
+- **🎚️ Dynamic [HD] / [SD] Stream Quality Toggle**:
+  Each tile features an interactive on-screen quality toggle badge:
+  - **HD**: Full resolution 1080p Main Stream for maximum detail.
+  - **SD**: Fluent 4CIF/VGA Sub Stream for low network load and dense grids.
+  - **Auto-Promotion**: Double-clicking to maximize a tile automatically upgrades it to Full HD Main Stream.
 - **🖥️ Multi-Window Grid Manager**:
   Supports standard NVR grid layouts:
   - **1x1** (Single window)
@@ -65,11 +73,12 @@ This extension completely eliminates the need for any native installer or backgr
   Double-click any tile to zoom to 100% full view inside the container. Double-click again to restore the multi-split grid.
 - **⚡ Hover Quick Action Toolbar**:
   Each camera tile features a sleek floating action bar on hover:
+  - 🎚️ **HD / SD Toggle**: Switch instantly between Full HD (1080p) and Fluent Sub Stream.
   - 📷 **Instant Snapshot**: Downloads high-resolution JPEG directly.
   - ⛶ **Zoom / Restore**: Toggles full tile view.
   - ✕ **Close Stream**: Stops the active stream and resets the tile.
 - **📊 Real-Time On-Screen Display (OSD)**:
-  Displays the camera channel name (e.g. `Front Left [CH 1]`), illuminated live badge, active resolution, and real-time FPS counter (`704x576 • 25fps`).
+  Displays the camera channel name (e.g. `Front Left [CH 1]`), illuminated live badge, active resolution and quality tag, and real-time FPS counter (`1920x1080 [HD] • 5fps`).
 - **🎨 Sleek Idle Placeholders**:
   Unconfigured or stopped tiles display clean CCTV camera placeholders rather than pitch-black voids.
 - **🛑 Zero Accidental Auto-Play**:
@@ -101,7 +110,7 @@ This extension completely eliminates the need for any native installer or backgr
 
 ### Pre-Packaged Zip Release
 
-Download `annke-hikvision-bridge-v1.0.5.zip` from Releases, unzip it, and use **Load unpacked** pointing to the extracted folder.
+Download `annke-hikvision-bridge-v1.0.6.zip` (or `hikvision-web-plugin-translator-v1.0.6.zip`) from Releases, unzip it, and use **Load unpacked** pointing to the extracted folder.
 
 ---
 
