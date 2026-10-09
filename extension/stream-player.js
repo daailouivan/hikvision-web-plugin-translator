@@ -517,8 +517,12 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
     }
 
     async startSnapshotStream(channel, origin, credentials, streamType = "auto", session = this.sessionId) {
-      const isExplicitSub = streamType === "sub" || (channel.endsWith("2") && streamType !== "main");
-      const isMain = !isExplicitSub;
+      if (channel === "0" || streamType === "zero") {
+        return this.startZeroChannelStream(origin, credentials, session);
+      }
+
+      const isSub = streamType === "sub" || (channel.endsWith("2") && streamType !== "main");
+      const isMain = !isSub;
 
       let snapUrl = `${origin}/ISAPI/ContentMgmt/StreamingProxy/channel/${channel}/Picture?snapShotImageType=JPEG`;
       if (isMain) {
@@ -616,6 +620,168 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
       streamLoop();
     }
 
+    async startZeroChannelStream(origin, credentials, session = this.sessionId) {
+      this.currentQuality = "Zero";
+      this.drawStatus("Connecting to ZeroChannel 01 (Multi-View Matrix)...");
+
+      const canvasWidth = 704;
+      const canvasHeight = 576;
+      if (this.canvas.width !== canvasWidth || this.canvas.height !== canvasHeight) {
+        this.canvas.width = canvasWidth;
+        this.canvas.height = canvasHeight;
+      }
+
+      const channels = ["102", "202", "302", "402", "502", "602", "702", "802"];
+      const defaultNames = [
+        "CH1 Front Left", "CH2 Front Right", "CH3 Rear Left", "CH4 Rear Right",
+        "CH5 Warehouse In", "CH6 Warehouse Out", "CH7 Channel 7", "CH8 Hallway"
+      ];
+      const channelNames = channels.map((ch, idx) => {
+        try {
+          const chNum = idx + 1;
+          const el = document.querySelector(`.channel-list .ch-name[channel='${chNum}']`) ||
+                     document.querySelector(`.channel-list [channel='${chNum}']`);
+          if (el && el.textContent.trim()) {
+            return `CH${chNum} ${el.textContent.trim()}`;
+          }
+        } catch (e) {}
+        return defaultNames[idx];
+      });
+      const cachedBitmaps = new Array(8).fill(null);
+      let authState = null;
+
+      const renderComposite = () => {
+        if (!this.canvas || !this.ctx || !this.isPlaying || this.sessionId !== session) return;
+
+        const cellW = Math.floor(canvasWidth / 3);
+        const cellH = Math.floor(canvasHeight / 3);
+
+        this.ctx.fillStyle = "#111";
+        this.ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+        for (let i = 0; i < 9; i++) {
+          const col = i % 3;
+          const row = Math.floor(i / 3);
+          const x = col * cellW;
+          const y = row * cellH;
+
+          if (i < 8) {
+            const bmp = cachedBitmaps[i];
+            if (bmp) {
+              this.ctx.drawImage(bmp, x, y, cellW, cellH);
+            } else {
+              this.ctx.fillStyle = "#1c1c1c";
+              this.ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+              this.ctx.fillStyle = "#777";
+              this.ctx.font = "11px sans-serif";
+              this.ctx.textAlign = "center";
+              this.ctx.fillText(`Connecting ${channelNames[i]}...`, x + cellW / 2, y + cellH / 2);
+            }
+
+            // Cell header banner
+            this.ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+            this.ctx.fillRect(x, y, cellW, 16);
+            this.ctx.fillStyle = "#00d2ff";
+            this.ctx.font = "10px sans-serif";
+            this.ctx.textAlign = "left";
+            this.ctx.fillText(channelNames[i], x + 4, y + 12);
+          } else {
+            // 9th cell: ZeroChannel Status / Overview
+            this.ctx.fillStyle = "#161616";
+            this.ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+            this.ctx.fillStyle = "#00e676";
+            this.ctx.font = "bold 12px sans-serif";
+            this.ctx.textAlign = "center";
+            this.ctx.fillText("ZeroChannel 01", x + cellW / 2, y + cellH / 2 - 8);
+            this.ctx.fillStyle = "#888";
+            this.ctx.font = "10px sans-serif";
+            this.ctx.fillText("8-CH Composite Matrix", x + cellW / 2, y + cellH / 2 + 10);
+          }
+
+          // Cell grid line
+          this.ctx.strokeStyle = "#2a2a2a";
+          this.ctx.lineWidth = 1;
+          this.ctx.strokeRect(x, y, cellW, cellH);
+        }
+
+        this.frameCount++;
+        const now = performance.now();
+        if (now - this.lastFpsTime >= 1000) {
+          this.fps = Math.round((this.frameCount * 1000) / (now - this.lastFpsTime));
+          this.frameCount = 0;
+          this.lastFpsTime = now;
+          if (typeof this.onStats === "function") {
+            this.onStats({
+              width: canvasWidth,
+              height: canvasHeight,
+              fps: this.fps,
+              quality: "Zero"
+            });
+          }
+        }
+      };
+
+      let chIdx = 0;
+      while (this.isPlaying && this.sessionId === session) {
+        const curCh = channels[chIdx];
+        const targetIdx = chIdx;
+        chIdx = (chIdx + 1) % channels.length;
+
+        const snapUrl = `${origin}/ISAPI/ContentMgmt/StreamingProxy/channel/${curCh}/Picture?snapShotImageType=JPEG`;
+        const headers = {};
+        if (authState) {
+          const authVal = this.buildDigestHeader("GET", snapUrl, credentials, authState);
+          if (authVal) headers["Authorization"] = authVal;
+        }
+
+        try {
+          let res = await fetch(snapUrl, {
+            method: "GET",
+            headers: headers,
+            credentials: "include",
+            signal: this.abortController ? this.abortController.signal : undefined
+          });
+
+          if (!this.isPlaying || this.sessionId !== session) break;
+
+          if (res.status === 401) {
+            const wwwAuth = res.headers.get("WWW-Authenticate") || "";
+            const challenge = this.parseDigestChallenge(wwwAuth);
+            if (challenge && credentials.user && credentials.pass) {
+              authState = challenge;
+              const authVal = this.buildDigestHeader("GET", snapUrl, credentials, authState);
+              res = await fetch(snapUrl, {
+                method: "GET",
+                headers: { Authorization: authVal },
+                credentials: "include",
+                signal: this.abortController ? this.abortController.signal : undefined
+              });
+            }
+          }
+
+          if (res.ok && this.isPlaying && this.sessionId === session) {
+            const blob = await res.blob();
+            if (blob.size > 100) {
+              const bmp = await createImageBitmap(blob);
+              if (this.isPlaying && this.sessionId === session) {
+                if (cachedBitmaps[targetIdx]) cachedBitmaps[targetIdx].close();
+                cachedBitmaps[targetIdx] = bmp;
+                renderComposite();
+              } else {
+                bmp.close();
+              }
+            }
+          }
+        } catch (e) {
+          if (e.name === "AbortError" || !this.isPlaying || this.sessionId !== session) break;
+        }
+
+        await new Promise(r => setTimeout(r, 40));
+      }
+
+      cachedBitmaps.forEach(b => { if (b) b.close(); });
+    }
+
     async play(streamUrl, options = {}) {
       this.stop();
       this.sessionId = (this.sessionId || 0) + 1;
@@ -629,31 +795,65 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
       const credentials = this.resolveCredentials(options);
       console.log(`[StreamPlayer] Credentials resolved: "${credentials.user}" (has pass: ${!!credentials.pass})`);
 
-      // Determine and normalize channel ID:
-      function normalizeChannel(raw) {
-        let c = parseInt(raw, 10);
-        if (isNaN(c) || c <= 0) return "101";
-        if (c >= 3300) {
-          c = (Math.floor(c / 100) - 32) * 100 + (c % 100);
-        } else if (c < 100) {
-          c = c * 100 + 1;
-        }
-        return String(c);
-      }
+      // 1. Check for ZeroChannel / ZeroStreaming explicitly:
+      const isZero = options.isZeroChannel ||
+                     options.channel === "0" ||
+                     options.streamType === "zero" ||
+                     (typeof streamUrl === "string" && (
+                       streamUrl.toLowerCase().includes("zerostreaming") ||
+                       streamUrl.endsWith("/0") ||
+                       streamUrl.includes("/channels/0")
+                     ));
 
-      let rawCh = options.channel || "101";
-      if (!options.channel && typeof streamUrl === "string") {
-        const m = streamUrl.match(/\/(\d{3,4})(?:\/|$|\?)/) || streamUrl.match(/(\d{3,4})/);
-        if (m) rawCh = m[1];
+      let channel = options.channel ? String(options.channel) : "";
+      let streamType = options.streamType || "auto";
+
+      if (isZero) {
+        channel = "0";
+        streamType = "zero";
+      } else {
+        // 2. Decode SDK/play/{N}/004: Index N is (ISAPI_channel - 1)!
+        if (typeof streamUrl === "string") {
+          const sdkMatch = streamUrl.match(/\/SDK\/play\/(\d+)\//i) || streamUrl.match(/\/SDK\/playback\/(\d+)/i);
+          if (sdkMatch) {
+            const n = parseInt(sdkMatch[1], 10);
+            channel = String(n + 1);
+            if (streamType === "auto") {
+              streamType = channel.endsWith("2") ? "sub" : "main";
+            }
+          }
+        }
+
+        if (!channel && typeof streamUrl === "string") {
+          const m = streamUrl.match(/\/(\d{3,4})(?:\/|$|\?)/);
+          if (m) channel = m[1];
+        }
+
+        function normalizeChannel(raw) {
+          let c = parseInt(raw, 10);
+          if (isNaN(c) || c <= 0) return "101";
+          if (c >= 3300) {
+            c = (Math.floor(c / 100) - 32) * 100 + (c % 100);
+          } else if (c < 100) {
+            c = c * 100 + (streamType === "sub" ? 2 : 1);
+          }
+          return String(c);
+        }
+
+        channel = normalizeChannel(channel || "101");
+
+        if (streamType === "auto") {
+          streamType = channel.endsWith("2") ? "sub" : "main";
+        }
       }
-      const channel = normalizeChannel(rawCh);
 
       const origin = options.origin || `${window.location.protocol}//${window.location.host}`;
 
-      const streamType = options.streamType || (channel.endsWith("2") ? "sub" : "main");
-
-      // Launch high-speed snapshot streaming engine
-      this.startSnapshotStream(channel, origin, credentials, streamType, currentSession);
+      if (streamType === "zero") {
+        this.startZeroChannelStream(origin, credentials, currentSession);
+      } else {
+        this.startSnapshotStream(channel, origin, credentials, streamType, currentSession);
+      }
     }
 
     stop() {

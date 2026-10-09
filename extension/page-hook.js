@@ -167,8 +167,16 @@
 
     resolveChannelName(channelId) {
       if (!channelId) return "";
+      if (channelId === "0" || channelId === "zero" || String(channelId).toLowerCase().includes("zero")) {
+        return "ZeroChannel 01";
+      }
       try {
-        const chNum = Math.floor(parseInt(channelId, 10) / 100);
+        let c = parseInt(channelId, 10);
+        if (c >= 3300) {
+          c = (Math.floor(c / 100) - 32) * 100 + (c % 100);
+        }
+        const chNum = Math.floor(c / 100);
+        if (chNum === 0) return "ZeroChannel 01";
         const chNameEl = document.querySelector(`.channel-list .ch-name[channel='${chNum}']`) ||
                          document.querySelector(`.channel-list [channel='${chNum}']`) ||
                          document.querySelector(`.ch-name[channel='${channelId}']`);
@@ -257,7 +265,7 @@
           const act = target.getAttribute("data-act");
           if (act === "stream-quality") {
             const entry = this.cells.get(wndIndex);
-            if (entry && entry.isPlaying && entry.channelId) {
+            if (entry && entry.isPlaying && entry.channelId && entry.channelId !== "0") {
               const currentCh = parseInt(entry.channelId, 10);
               const baseCh = Math.floor(currentCh / 100) * 100;
               const isCurrentlySub = (currentCh % 10) === 2;
@@ -446,27 +454,127 @@
       });
     },
 
-    startPlay(wndIndex, streamUrl, options, channelId) {
+    parseStreamInfo(streamUrl, options = {}) {
+      if (typeof streamUrl !== "string") streamUrl = "";
+      const rawCh = options.channel ? String(options.channel) : "";
+
+      // 1. ZeroChannel detection:
+      if (
+        streamUrl.toLowerCase().includes("zerostreaming") ||
+        streamUrl.endsWith("/0") ||
+        streamUrl.includes("/channels/0") ||
+        rawCh === "0" ||
+        rawCh.toLowerCase() === "zero" ||
+        (rawCh === "9" && streamUrl.includes("Zero"))
+      ) {
+        return {
+          channelId: "0",
+          channelName: "ZeroChannel 01",
+          isZeroChannel: true,
+          streamType: "zero"
+        };
+      }
+
+      // 2. SDK/play/{N}/004: Index N is (ISAPI_channel - 1)!
+      const sdkMatch = streamUrl.match(/\/SDK\/play\/(\d+)\//i);
+      if (sdkMatch) {
+        let n = parseInt(sdkMatch[1], 10);
+        let realChannel = n + 1;
+        if (realChannel >= 3300) {
+          realChannel = (Math.floor(realChannel / 100) - 32) * 100 + (realChannel % 100);
+        }
+        const chStr = String(realChannel);
+        const isSub = chStr.endsWith("2") || (options.streamType === "sub");
+        return {
+          channelId: chStr,
+          channelName: this.resolveChannelName(chStr),
+          isZeroChannel: false,
+          streamType: isSub ? "sub" : "main"
+        };
+      }
+
+      // 3. SDK/playback/{N}/:
+      const pbMatch = streamUrl.match(/\/SDK\/playback\/(\d+)/i);
+      if (pbMatch) {
+        let n = parseInt(pbMatch[1], 10);
+        let realChannel = n + 1;
+        if (realChannel >= 3300) {
+          realChannel = (Math.floor(realChannel / 100) - 32) * 100 + (realChannel % 100);
+        }
+        const chStr = String(realChannel);
+        const isSub = chStr.endsWith("2") || (options.streamType === "sub");
+        return {
+          channelId: chStr,
+          channelName: this.resolveChannelName(chStr),
+          isZeroChannel: false,
+          streamType: isSub ? "sub" : "main"
+        };
+      }
+
+      // 4. Fallback for direct channel:
+      let raw = rawCh;
+      if (!raw) {
+        const m = streamUrl.match(/\/(\d{3,4})(?:\/|$|\?)/);
+        if (m) raw = m[1];
+      }
+
+      let c = parseInt(raw, 10);
+      if (isNaN(c) || c <= 0) {
+        return { channelId: "101", channelName: this.resolveChannelName("101"), isZeroChannel: false, streamType: "main" };
+      }
+
+      if (c >= 3300) {
+        c = (Math.floor(c / 100) - 32) * 100 + (c % 100);
+      } else if (c < 100) {
+        c = c * 100 + (options.streamType === "sub" ? 2 : 1);
+      }
+
+      const channelId = String(c);
+      const isSub = channelId.endsWith("2") || (options.streamType === "sub");
+      return {
+        channelId: channelId,
+        channelName: this.resolveChannelName(channelId),
+        isZeroChannel: false,
+        streamType: isSub ? "sub" : "main"
+      };
+    },
+
+    startPlay(wndIndex, streamUrl, options = {}, channelId) {
       wndIndex = parseInt(wndIndex, 10) || 0;
       const entry = this.getCell(wndIndex);
       entry.isPlaying = true;
-      entry.channelId = channelId;
+
+      const parsed = this.parseStreamInfo(streamUrl, Object.assign({}, options, { channel: channelId }));
+      const activeChannel = parsed.channelId;
+      const isZero = parsed.isZeroChannel;
+      const isSub = parsed.streamType === "sub";
+
+      entry.channelId = activeChannel;
       entry.cellEl.classList.add("playing");
 
-      const chLabel = this.resolveChannelName(channelId);
+      const chLabel = parsed.channelName || this.resolveChannelName(activeChannel);
       if (entry.osdTitle) entry.osdTitle.textContent = chLabel;
       if (entry.osdBadge) entry.osdBadge.classList.add("live");
 
       // Update stream quality button on the tile
       const qualityBtn = entry.cellEl.querySelector("[data-act='stream-quality']");
-      const isSub = String(channelId).endsWith("2");
       if (qualityBtn) {
-        qualityBtn.textContent = isSub ? "SD" : "HD";
-        qualityBtn.title = isSub ? "Current: SD (Fluent). Click to switch to HD (1080p Main Stream)" : "Current: HD (1080p). Click to switch to SD (Fluent Sub Stream)";
+        if (isZero) {
+          qualityBtn.textContent = "ZERO";
+          qualityBtn.title = "Zero-Channel 01: Composite 8-Channel Multi-View";
+        } else if (isSub) {
+          qualityBtn.textContent = "SD";
+          qualityBtn.title = "Current: Sub-Stream (SD Fluent). Click to switch to HD (1080p Main Stream)";
+        } else {
+          qualityBtn.textContent = "HD";
+          qualityBtn.title = "Current: Main Stream (Full HD). Click to switch to SD (Fluent Sub-Stream)";
+        }
       }
 
       const streamOptions = Object.assign({}, options, {
-        streamType: isSub ? "sub" : "main"
+        channel: activeChannel,
+        streamType: parsed.streamType,
+        isZeroChannel: isZero
       });
 
       entry.player.play(streamUrl, streamOptions);
@@ -691,36 +799,21 @@
           const loc = window.location;
           const cameraOrigin = `${loc.protocol}//${loc.host}`;
 
-          // Normalize channel ID:
-          // Handles PSIA 3301 -> ISAPI 101, 3401 -> 201, etc.
-          // Handles video://.../101 -> 101, channel: 1 -> 101
-          function normalizeChannel(raw) {
-            let c = parseInt(raw, 10);
-            if (isNaN(c) || c <= 0) return "101";
-            if (c >= 3300) {
-              c = (Math.floor(c / 100) - 32) * 100 + (c % 100);
-            } else if (c < 100) {
-              c = c * 100 + 1;
-            }
-            return String(c);
-          }
+          const parsed = WindowManager.parseStreamInfo(streamUrl, {
+            channel: msg.channel,
+            streamType: msg.streamType
+          });
 
-          let channelId = "101";
-          if (msg.channel) {
-            channelId = normalizeChannel(msg.channel);
-          } else if (typeof streamUrl === "string") {
-            const m = streamUrl.match(/\/(\d{3,4})(?:\/|$|\?)/) || streamUrl.match(/(\d{3,4})/);
-            if (m) channelId = normalizeChannel(m[1]);
-          }
-
-          console.log(`[Annke/Hikvision Bridge] Starting stream playback for wndIndex ${wndIndex}, channel: ${channelId}, rawUrl: ${streamUrl}`);
+          console.log(`[Annke/Hikvision Bridge] Starting stream playback for wndIndex ${wndIndex}, channel: ${parsed.channelId} (${parsed.streamType}), rawUrl: ${streamUrl}`);
           WindowManager.startPlay(wndIndex, streamUrl, {
-            channel: channelId,
+            channel: parsed.channelId,
             origin: cameraOrigin,
+            streamType: parsed.streamType,
+            isZeroChannel: parsed.isZeroChannel,
             auth: msg.auth,
             token: msg.token,
             userInfo: msg.userInfo
-          }, channelId);
+          }, parsed.channelId);
           break;
         }
 
