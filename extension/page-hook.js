@@ -1190,7 +1190,7 @@
         height: 100% !important;
         display: block !important;
         background: #000 !important;
-        object-fit: contain !important;
+        object-fit: fill !important;
       }
       .hik-wnd-osd {
         position: absolute;

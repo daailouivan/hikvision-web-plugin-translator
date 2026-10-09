@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome%20Extension-Manifest%20V3-brightgreen.svg)](extension/manifest.json)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-orange.svg)](#)
-[![Version](https://img.shields.io/badge/Release-v1.0.7-blue.svg)](#)
+[![Version](https://img.shields.io/badge/Release-v1.0.8-blue.svg)](#)
 
 A modern, cross-platform **Manifest V3 WebExtension** that seamlessly translates and virtualizes Hikvision & Annke's legacy plugin protocol (`LocalServiceComponents.exe` / `WebComponents.exe` / NPAPI) into native **HTML5 Canvas and WebCodecs** directly inside modern web browsers.
 
@@ -69,6 +69,8 @@ This extension completely eliminates the need for any native installer or backgr
   - **SD**: Fluent 4CIF/VGA Sub Stream for low network load and dense grids.
   - **ZERO**: Dedicated ZeroChannel multi-view badge.
   - **Auto-Promotion**: Double-clicking to maximize a tile automatically upgrades it to Full HD Main Stream.
+- **🔲 Seamless Grid Confine Fit (Zero Black Bars)**:
+  Eliminates letterboxing and pillarboxing across all split grids (1x1, 2x2, 3x3, 4x4) by fitting each video canvas directly to the tile's rectangular confines, matching the display behavior of native CCTV surveillance consoles.
 - **🖥️ Multi-Window Grid Manager**:
   Supports standard NVR grid layouts:
   - **1x1** (Single window)
@@ -118,7 +120,7 @@ This extension completely eliminates the need for any native installer or backgr
 
 ### Pre-Packaged Zip Release
 
-Download `annke-hikvision-bridge-v1.0.7.zip` (or `hikvision-web-plugin-translator-v1.0.7.zip`) from Releases, unzip it, and use **Load unpacked** pointing to the extracted folder.
+Download `annke-hikvision-bridge-v1.0.8.zip` (or `hikvision-web-plugin-translator-v1.0.8.zip`) from Releases, unzip it, and use **Load unpacked** pointing to the extracted folder.
 
 ---
 
