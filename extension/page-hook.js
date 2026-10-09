@@ -137,6 +137,50 @@
   // =========================================================================
   let activeVirtualWebSocket = null;
 
+  const DEFAULT_LOCAL_CONFIG = {
+    protocolType: "0",        // 0: TCP, 1: UDP, 2: MULTICAST
+    streamType: "0",          // 0: Main Stream, 1: Sub-Stream
+    buffNumberType: "2",      // 1: Shortest Delay, 2: Balanced, 3: Smoothest
+    playWndType: "0",         // 0: Auto-fill, 1: 4:3, 2: 16:9
+    ivsMode: "0",             // 0: Disable rules, 1: Enable
+    captureFileFormat: "0",   // 0: JPEG, 1: BMP
+    packgeSize: "1",          // 0: 256M, 1: 512M, 2: 1G
+    recordPath: "Downloads",
+    downloadPath: "Downloads",
+    capturePath: "Downloads",
+    playbackPicPath: "Downloads",
+    playbackFilePath: "Downloads",
+    realPlayAll: "0",         // 0: No, 1: Yes (Auto Start Live View)
+    osdPosInfo: "0",
+    secretKey: ""
+  };
+
+  function getStoredLocalConfig() {
+    try {
+      const raw = localStorage.getItem("hik_local_config");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return Object.assign({}, DEFAULT_LOCAL_CONFIG, parsed);
+      }
+    } catch (e) {
+      console.warn("[Annke/Hikvision Bridge] Error reading stored local config:", e);
+    }
+    return Object.assign({}, DEFAULT_LOCAL_CONFIG);
+  }
+
+  function saveStoredLocalConfig(newCfg) {
+    try {
+      const current = getStoredLocalConfig();
+      const merged = Object.assign({}, current, newCfg);
+      localStorage.setItem("hik_local_config", JSON.stringify(merged));
+      console.log("[Annke/Hikvision Bridge] Persisted localConfig:", merged);
+      return merged;
+    } catch (e) {
+      console.warn("[Annke/Hikvision Bridge] Error saving local config:", e);
+      return newCfg;
+    }
+  }
+
   const WindowManager = {
     cells: new Map(),
     splitMode: 1, // 1: 1x1, 2: 2x2, 3: 3x3, 4: 4x4
@@ -150,19 +194,36 @@
         document.getElementById("play_window"),
         document.getElementById("liveview_play"),
         document.querySelector(".plugin-content"),
-        document.querySelector(".video-content"),
-        document.getElementById("view"),
-        document.body
+        document.querySelector(".video-content")
       ];
-      const container = candidates.find(el => el !== null && el !== undefined) || document.body;
-      if (container && container !== document.body) {
-        container.style.position = "relative";
-        container.style.backgroundColor = "#121212";
-        container.style.overflow = "hidden";
-        const tip = container.querySelector(".txtTip, .pluginLink, table");
+      for (const el of candidates) {
+        if (!el) continue;
+        // Never treat no-window, hidden, or display:none elements as a video viewport
+        if (el.classList.contains("no-window") || el.classList.contains("hide") || el.classList.contains("ng-hide")) {
+          continue;
+        }
+        if (el.style.display === "none" || el.hidden) {
+          continue;
+        }
+        el.style.position = "relative";
+        el.style.backgroundColor = "#121212";
+        el.style.overflow = "hidden";
+        const tip = el.querySelector(".txtTip, .pluginLink, table");
         if (tip) tip.remove();
+        return el;
       }
-      return container;
+      return null;
+    },
+
+    applyPlayWndType(val) {
+      const sizeMode = String(val !== undefined && val !== null ? val : "0");
+      const container = this.getContainer();
+      if (container) {
+        container.setAttribute("data-image-size", sizeMode);
+      }
+      if (document.documentElement) {
+        document.documentElement.setAttribute("data-image-size", sizeMode);
+      }
     },
 
     resolveChannelName(channelId) {
@@ -191,10 +252,30 @@
     getCell(wndIndex = 0) {
       wndIndex = parseInt(wndIndex, 10) || 0;
       if (this.cells.has(wndIndex)) {
-        return this.cells.get(wndIndex);
+        const existing = this.cells.get(wndIndex);
+        if (existing.cellEl && existing.cellEl.isConnected) {
+          return existing;
+        }
+        this.cells.delete(wndIndex);
       }
 
       const container = this.getContainer();
+      if (!container) {
+        const dummyCanvas = document.createElement("canvas");
+        return {
+          wndIndex,
+          cellEl: document.createElement("div"),
+          canvas: dummyCanvas,
+          osdTitle: null,
+          osdBadge: null,
+          osdRes: null,
+          player: new CameraStreamPlayer(dummyCanvas),
+          isPlaying: false,
+          channelId: null,
+          isDetached: true
+        };
+      }
+
       const cellId = `hik-wnd-cell-${wndIndex}`;
       let cellEl = document.getElementById(cellId);
       let canvas = null;
@@ -340,11 +421,16 @@
       this.selectedWndIndex = wndIndex;
       console.log(`[Annke/Hikvision Bridge] Selected window: ${wndIndex}`);
 
+      const container = this.getContainer();
+      if (!container) return;
+
       this.cells.forEach((entry, idx) => {
-        if (idx === wndIndex) {
-          entry.cellEl.classList.add("hik-wnd-selected");
-        } else {
-          entry.cellEl.classList.remove("hik-wnd-selected");
+        if (entry.cellEl) {
+          if (idx === wndIndex) {
+            entry.cellEl.classList.add("hik-wnd-selected");
+          } else {
+            entry.cellEl.classList.remove("hik-wnd-selected");
+          }
         }
       });
 
@@ -388,9 +474,18 @@
       if (split === 9) split = 3;
       else if (split === 16) split = 4;
       else if (split > 4) split = 4;
-      console.log(`[Annke/Hikvision Bridge] Arranging window grid to ${split}x${split} (${split * split} windows)`);
       this.splitMode = split;
       this.maximizedWndIndex = -1;
+
+      const container = this.getContainer();
+      if (!container) {
+        console.log("[Annke/Hikvision Bridge] No video container on current page, skipping arrangeWindow DOM injection");
+        return;
+      }
+
+      console.log(`[Annke/Hikvision Bridge] Arranging window grid to ${split}x${split} (${split * split} windows)`);
+      const cfg = getStoredLocalConfig();
+      this.applyPlayWndType(cfg.playWndType);
 
       const totalSlots = split * split;
       for (let i = 0; i < totalSlots; i++) {
@@ -407,6 +502,9 @@
     },
 
     updateLayout() {
+      const container = this.getContainer();
+      if (!container) return;
+
       const split = this.splitMode;
       const totalSlots = split * split;
 
@@ -541,6 +639,11 @@
 
     startPlay(wndIndex, streamUrl, options = {}, channelId) {
       wndIndex = parseInt(wndIndex, 10) || 0;
+      const container = this.getContainer();
+      if (!container) {
+        console.warn("[Annke/Hikvision Bridge] Cannot start playback: No video container on page");
+        return;
+      }
       const entry = this.getCell(wndIndex);
       entry.isPlaying = true;
 
@@ -603,6 +706,7 @@
 
     toggleFullscreen() {
       const container = this.getContainer();
+      if (!container) return;
       if (!document.fullscreenElement) {
         container.requestFullscreen().catch(() => {});
       } else {
@@ -612,15 +716,21 @@
   };
 
   // Observer to immediately remove any "click to download plugin" injected into #main_plugin
+  // and remove any stray video cells from non-video containers
   function setupPluginCleaner() {
     const observer = new MutationObserver(() => {
       const mainPlugin = document.getElementById("main_plugin");
-      if (mainPlugin) {
+      if (mainPlugin && !mainPlugin.classList.contains("no-window")) {
         const prompt = mainPlugin.querySelector(".txtTip, .pluginLink, table");
         if (prompt) {
           console.log("[Annke/Hikvision Bridge] DOM observer: Suppressing download prompt table");
           prompt.remove();
         }
+      }
+      // Ensure no stray video cells leak into .no-window containers or #view
+      const strayCells = document.querySelectorAll(".no-window .hik-wnd-cell, #view > .hik-wnd-cell");
+      if (strayCells.length > 0) {
+        strayCells.forEach(el => el.remove());
       }
     });
 
@@ -742,14 +852,14 @@
 
         case "window.showWnd":
         case "showWnd": {
-          const entry = WindowManager.getCell(wndIndex);
+          const entry = WindowManager.cells.get(wndIndex);
           if (entry && entry.cellEl) entry.cellEl.style.display = "block";
           break;
         }
 
         case "window.hideWnd":
         case "hideWnd": {
-          const entry = WindowManager.getCell(wndIndex);
+          const entry = WindowManager.cells.get(wndIndex);
           if (entry && entry.cellEl) entry.cellEl.style.display = "none";
           break;
         }
@@ -763,21 +873,22 @@
 
         case "video.getLocalConfig":
         case "getLocalConfig": {
-          response.localConfig = {
-            protocolType: "0",
-            streamType: "0",
-            realPlayAll: "0", // CRITICAL: 0 stops auto-playing all channels on startup
-            captureFileFormat: "0",
-            capturePath: "Downloads",
-            recordPath: "Downloads",
-            playbackPath: "Downloads",
-            secretKey: ""
-          };
+          response.localConfig = getStoredLocalConfig();
           break;
         }
 
         case "video.setLocalConfig":
-        case "setLocalConfig":
+        case "setLocalConfig": {
+          if (msg.localConfig) {
+            const saved = saveStoredLocalConfig(msg.localConfig);
+            if (WindowManager && WindowManager.applyPlayWndType) {
+              WindowManager.applyPlayWndType(saved.playWndType);
+            }
+          }
+          response.status = "ok";
+          break;
+        }
+
         case "video.setPlayMode":
         case "setPlayMode":
         case "video.setIsHttps":
@@ -1000,8 +1111,10 @@
         }
 
         case "video.browseFilePath":
+        case "video.openFileBrowser":
         case "video.openDirectory": {
           response.path = "Downloads";
+          response.dir = "Downloads";
           break;
         }
 
@@ -1155,7 +1268,7 @@
     const style = document.createElement("style");
     style.id = "hik-bridge-canvas-style";
     style.textContent = `
-      #main_plugin {
+      #main_plugin:not(.no-window), #divPlugin:not(.no-window), #play_window:not(.no-window), #liveview_play:not(.no-window) {
         position: relative !important;
         background: #121212 !important;
         min-height: 240px;
@@ -1163,8 +1276,19 @@
         height: 100% !important;
         overflow: hidden !important;
       }
-      #main_plugin table {
+      #main_plugin:not(.no-window) table, #divPlugin:not(.no-window) table {
         display: none !important;
+      }
+      #main_plugin.no-window, #divPlugin.no-window, .no-window {
+        display: none !important;
+        width: 0 !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        max-height: 0 !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
       }
       .hik-wnd-cell {
         position: absolute !important;
@@ -1182,15 +1306,40 @@
       .hik-wnd-cell:hover:not(.hik-wnd-selected) {
         border-color: #555 !important;
       }
+      /* Aspect Ratio / Image Size modes */
+      /* 0: Auto-fill (default) - Fit to tile confines without letterboxing */
       .hik-wnd-canvas {
         position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
+        inset: 0 !important;
         width: 100% !important;
         height: 100% !important;
         display: block !important;
         background: #000 !important;
         object-fit: fill !important;
+      }
+      /* 1: 4:3 Aspect Ratio */
+      [data-image-size="1"] .hik-wnd-canvas {
+        position: absolute !important;
+        inset: 0 !important;
+        margin: auto !important;
+        width: auto !important;
+        height: auto !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+        aspect-ratio: 4 / 3 !important;
+        object-fit: contain !important;
+      }
+      /* 2: 16:9 Aspect Ratio */
+      [data-image-size="2"] .hik-wnd-canvas {
+        position: absolute !important;
+        inset: 0 !important;
+        margin: auto !important;
+        width: auto !important;
+        height: auto !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+        aspect-ratio: 16 / 9 !important;
+        object-fit: contain !important;
       }
       .hik-wnd-osd {
         position: absolute;

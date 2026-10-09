@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome%20Extension-Manifest%20V3-brightgreen.svg)](extension/manifest.json)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-orange.svg)](#)
-[![Version](https://img.shields.io/badge/Release-v1.0.8-blue.svg)](#)
+[![Version](https://img.shields.io/badge/Release-v1.0.9-blue.svg)](#)
 
 A modern, cross-platform **Manifest V3 WebExtension** that seamlessly translates and virtualizes Hikvision & Annke's legacy plugin protocol (`LocalServiceComponents.exe` / `WebComponents.exe` / NPAPI) into native **HTML5 Canvas and WebCodecs** directly inside modern web browsers.
 
@@ -91,6 +91,10 @@ This extension completely eliminates the need for any native installer or backgr
   Displays the camera channel name (e.g. `Front Left [CH 1]`), illuminated live badge, active resolution and quality tag, and real-time FPS counter (`1920x1080 [HD] • 5fps`).
 - **🎨 Sleek Idle Placeholders**:
   Unconfigured or stopped tiles display clean CCTV camera placeholders rather than pitch-black voids.
+- **⚙️ Complete Local Configuration Persistence**:
+  Full emulation of `video.getLocalConfig` and `video.setLocalConfig` backed by persistent local storage. Reliably preserves **Image Size** (`Auto-fill`, `4:3`, `16:9`), **Auto Start Live View** (`Yes`/`No`), buffer size, package size, and snapshot directories without resetting.
+- **🧹 Multi-Page DOM & Viewport Hygiene**:
+  Completely purges stray video boxes, canvas leaks, and unneeded player containers on non-video management tabs (Configuration -> Local, Maintenance, Camera Management, User Management, Network Advanced Services). Video elements are strictly isolated to active preview and playback viewports.
 - **🛑 Zero Accidental Auto-Play**:
   Default configuration suppresses unwanted startup streams (`realPlayAll: "0"`), loading into a clean idle grid until you choose what to watch.
 - **⏪ Playback & Time Synchronization**:
@@ -120,7 +124,7 @@ This extension completely eliminates the need for any native installer or backgr
 
 ### Pre-Packaged Zip Release
 
-Download `annke-hikvision-bridge-v1.0.8.zip` (or `hikvision-web-plugin-translator-v1.0.8.zip`) from Releases, unzip it, and use **Load unpacked** pointing to the extracted folder.
+Download `annke-hikvision-bridge-v1.0.9.zip` (or `hikvision-web-plugin-translator-v1.0.9.zip`) from Releases, unzip it, and use **Load unpacked** pointing to the extracted folder.
 
 ---
 

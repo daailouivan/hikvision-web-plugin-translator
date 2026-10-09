@@ -8,13 +8,24 @@
   const style = document.createElement("style");
   style.id = "hik-virtual-canvas-isolated-style";
   style.textContent = `
-    #main_plugin, #divPlugin, #play_window, #liveview_play {
+    #main_plugin:not(.no-window), #divPlugin:not(.no-window), #play_window:not(.no-window), #liveview_play:not(.no-window) {
       position: relative !important;
       background: #121212 !important;
       overflow: hidden !important;
     }
-    #main_plugin table, #divPlugin table {
+    #main_plugin:not(.no-window) table, #divPlugin:not(.no-window) table {
       display: none !important;
+    }
+    #main_plugin.no-window, #divPlugin.no-window, .no-window {
+      display: none !important;
+      width: 0 !important;
+      height: 0 !important;
+      min-height: 0 !important;
+      max-height: 0 !important;
+      border: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      overflow: hidden !important;
     }
   `;
   (document.head || document.documentElement).appendChild(style);
