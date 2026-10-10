@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome%20Extension-Manifest%20V3-brightgreen.svg)](extension/manifest.json)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-orange.svg)](#)
-[![Version](https://img.shields.io/badge/Release-v1.0.9-blue.svg)](#)
+[![Version](https://img.shields.io/badge/Release-v1.1.0-blue.svg)](#)
 
 A modern, cross-platform **Manifest V3 WebExtension** that seamlessly translates and virtualizes Hikvision & Annke's legacy plugin protocol (`LocalServiceComponents.exe` / `WebComponents.exe` / NPAPI) into native **HTML5 Canvas and WebCodecs** directly inside modern web browsers.
 
@@ -95,6 +95,14 @@ This extension completely eliminates the need for any native installer or backgr
   Full emulation of `video.getLocalConfig` and `video.setLocalConfig` backed by persistent local storage. Reliably preserves **Image Size** (`Auto-fill`, `4:3`, `16:9`), **Auto Start Live View** (`Yes`/`No`), buffer size, package size, and snapshot directories without resetting.
 - **🧹 Multi-Page DOM & Viewport Hygiene**:
   Completely purges stray video boxes, canvas leaks, and unneeded player containers on non-video management tabs (Configuration -> Local, Maintenance, Camera Management, User Management, Network Advanced Services). Video elements are strictly isolated to active preview and playback viewports.
+- **⚡ High-FPS Pipelined Stream Engine (10–15 FPS)**:
+  Replaced sluggish single-request serial polling (~3 FPS) with an asynchronous pipelined multi-worker streaming engine (3–4 in-flight requests with monotonic sequence ordering). Delivers a 300%–400% framerate increase for fluid, responsive real-time video playback.
+- **📐 Authentic 640x480 Sub-Stream Conforming**:
+  Conforms decoded sub-stream frames to the camera's true configured resolution (640x480 4:3 VGA for standard channels; 1280x720 for Channel 7), bypassing the NVR hardware's distorted default PAL 4CIF (704x576) scaler.
+- **🔲 Non-Interfering Selection Overlay**:
+  Upgraded window focus selection to use an isolated overlay (`::after`), ensuring window selection never shrinks the video canvas or causes grid layout shifts.
+- **🚀 Concurrent Parallel ZeroChannel Matrix**:
+  All 8 camera feeds in the ZeroChannel composite multi-view stream concurrently in parallel instead of one-by-one round-robin.
 - **🛑 Zero Accidental Auto-Play**:
   Default configuration suppresses unwanted startup streams (`realPlayAll: "0"`), loading into a clean idle grid until you choose what to watch.
 - **⏪ Playback & Time Synchronization**:
@@ -124,7 +132,7 @@ This extension completely eliminates the need for any native installer or backgr
 
 ### Pre-Packaged Zip Release
 
-Download `annke-hikvision-bridge-v1.0.9.zip` (or `hikvision-web-plugin-translator-v1.0.9.zip`) from Releases, unzip it, and use **Load unpacked** pointing to the extracted folder.
+Download `annke-hikvision-bridge-v1.1.0.zip` (or `hikvision-web-plugin-translator-v1.1.0.zip`) from Releases, unzip it, and use **Load unpacked** pointing to the extracted folder.
 
 ---
 

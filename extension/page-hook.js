@@ -1297,10 +1297,23 @@
         background: #000 !important;
         overflow: hidden !important;
         cursor: pointer;
-        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+      /* Selection overlay: Rendered OVER the video square without changing cell size or padding box */
+      .hik-wnd-cell::after {
+        content: "" !important;
+        position: absolute !important;
+        inset: 0 !important;
+        pointer-events: none !important;
+        border: 2px solid transparent !important;
+        box-sizing: border-box !important;
+        z-index: 5 !important;
+        transition: border-color 0.1s ease, box-shadow 0.1s ease !important;
       }
       .hik-wnd-cell.hik-wnd-selected {
-        border: 2px solid #2196F3 !important;
+        z-index: 10 !important;
+      }
+      .hik-wnd-cell.hik-wnd-selected::after {
+        border-color: #2196F3 !important;
         box-shadow: inset 0 0 6px rgba(33, 150, 243, 0.5) !important;
       }
       .hik-wnd-cell:hover:not(.hik-wnd-selected) {
