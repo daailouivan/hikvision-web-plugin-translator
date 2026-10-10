@@ -36,17 +36,8 @@
 
   function isLocalServiceUrl(urlStr) {
     if (!urlStr || typeof urlStr !== "string") return false;
-    try {
-      if (urlStr.includes("127.0.0.1") || urlStr.includes("localhost")) {
-        const url = new URL(urlStr, window.location.href);
-        const port = parseInt(url.port, 10);
-        if (port >= LOCAL_PORTS_MIN && port <= LOCAL_PORTS_MAX) return true;
-        if (url.pathname.includes("/imghttp/")) return true;
-      }
-      return urlStr.includes("127.0.0.1:3368") || urlStr.includes("/imghttp/local");
-    } catch (e) {
-      return urlStr.includes("127.0.0.1:3368") || urlStr.includes("/imghttp/local");
-    }
+    if (urlStr.includes("127.0.0.1") || urlStr.includes("localhost") || urlStr.includes("/imghttp/")) return true;
+    return false;
   }
 
   // =========================================================================
@@ -101,15 +92,35 @@
   function patchJSVideoPlugin(pluginClass) {
     if (!pluginClass) return;
     try {
-      if (typeof pluginClass.getPluginMode === "function") {
-        pluginClass.getPluginMode = function () {
-          console.log("[Annke/Hikvision Bridge] JSVideoPlugin.getPluginMode invoked -> returning LocalService mode (2)");
-          return Promise.resolve(2);
-        };
-      }
-      if (pluginClass.prototype && typeof pluginClass.prototype.JS_CheckLocalServiceConnected === "function") {
+      pluginClass.getPluginMode = function () {
+        console.log("[Annke/Hikvision Bridge] JSVideoPlugin.getPluginMode invoked -> returning LocalService mode (2)");
+        return Promise.resolve(2);
+      };
+      if (pluginClass.prototype) {
         pluginClass.prototype.JS_CheckLocalServiceConnected = function () {
           console.log("[Annke/Hikvision Bridge] JS_CheckLocalServiceConnected invoked -> resolving");
+          return Promise.resolve();
+        };
+        pluginClass.prototype.JS_GetVideoMode = function () {
+          return 2;
+        };
+        pluginClass.prototype.JS_StopRealPlayAll = function () {
+          WindowManager.stopAll();
+          return Promise.resolve();
+        };
+        pluginClass.prototype.JS_Stop = function (wndIndex) {
+          WindowManager.stop(wndIndex);
+          return Promise.resolve();
+        };
+        pluginClass.prototype.JS_ArrangeWindow = function (split, custom) {
+          WindowManager.arrangeWindow(split);
+          return Promise.resolve();
+        };
+        pluginClass.prototype.JS_SetPlayBackType = function (type) {
+          console.log(`[Annke/Hikvision Bridge] JS_SetPlayBackType(${type})`);
+          return Promise.resolve();
+        };
+        pluginClass.prototype.JS_SetTrsPlayBackParam = function (wnd, param) {
           return Promise.resolve();
         };
       }
@@ -118,15 +129,75 @@
     }
   }
 
-  let _capturedPlugin = window.JSVideoPlugin;
-  if (_capturedPlugin) {
-    patchJSVideoPlugin(_capturedPlugin);
+  function wrapPluginConstructor(pluginClass) {
+    if (!pluginClass || pluginClass.__bridgeWrapped) return pluginClass;
+    patchJSVideoPlugin(pluginClass);
+    function WrappedJSVideoPlugin(options) {
+      if (options) {
+        const origSuccess = options.onConnectSuccess;
+        options.onConnectError = function () {
+          console.warn("[Annke/Hikvision Bridge] Intercepted onConnectError, invoking onConnectSuccess");
+          if (typeof origSuccess === "function") origSuccess.call(this);
+        };
+      }
+      const inst = new pluginClass(options);
+      inst.iPluginMode = 2;
+
+      inst.JS_StopRealPlayAll = function () {
+        WindowManager.stopAll();
+        return Promise.resolve();
+      };
+      inst.JS_Stop = function (wndIndex) {
+        WindowManager.stop(wndIndex);
+        return Promise.resolve();
+      };
+      inst.JS_ArrangeWindow = function (split, custom) {
+        WindowManager.arrangeWindow(split);
+        return Promise.resolve();
+      };
+      inst.JS_GetVideoMode = function () {
+        return 2;
+      };
+
+      const patchInner = () => {
+        if (inst.oPlugin) {
+          inst.oPlugin.bLocalServiceRunning = true;
+          inst.oPlugin.JS_StopRealPlayAll = function () {
+            WindowManager.stopAll();
+            return Promise.resolve();
+          };
+          inst.oPlugin.JS_Stop = function (wnd) {
+            WindowManager.stop(wnd);
+            return Promise.resolve();
+          };
+          inst.oPlugin.JS_ArrangeWindow = function (split, custom) {
+            WindowManager.arrangeWindow(split);
+            return Promise.resolve();
+          };
+        }
+      };
+      patchInner();
+      setTimeout(patchInner, 50);
+      setTimeout(patchInner, 200);
+
+      return inst;
+    }
+    WrappedJSVideoPlugin.prototype = pluginClass.prototype;
+    WrappedJSVideoPlugin.getPluginMode = function () {
+      return Promise.resolve(2);
+    };
+    WrappedJSVideoPlugin.__bridgeWrapped = true;
+    return WrappedJSVideoPlugin;
   }
+
+  let _rawCapturedPlugin = window.JSVideoPlugin;
+  let _capturedPlugin = _rawCapturedPlugin ? wrapPluginConstructor(_rawCapturedPlugin) : null;
+
   Object.defineProperty(window, "JSVideoPlugin", {
     get: () => _capturedPlugin,
     set: (val) => {
-      _capturedPlugin = val;
-      patchJSVideoPlugin(_capturedPlugin);
+      _rawCapturedPlugin = val;
+      _capturedPlugin = wrapPluginConstructor(val);
     },
     configurable: true,
     enumerable: true
@@ -715,6 +786,8 @@
     }
   };
 
+  window.__HIK_WINDOW_MANAGER__ = WindowManager;
+
   // Observer to immediately remove any "click to download plugin" injected into #main_plugin
   // and remove any stray video cells from non-video containers
   function setupPluginCleaner() {
@@ -725,6 +798,9 @@
         if (prompt) {
           console.log("[Annke/Hikvision Bridge] DOM observer: Suppressing download prompt table");
           prompt.remove();
+          if (mainPlugin.querySelectorAll(".hik-wnd-cell").length === 0) {
+            WindowManager.arrangeWindow(WindowManager.splitMode);
+          }
         }
       }
       // Ensure no stray video cells leak into .no-window containers or #view
@@ -740,10 +816,361 @@
     }
   }
 
+  // =========================================================================
+  // Modern Playback Workflow & Multi-Grid Lockstep Synchronization
+  // =========================================================================
+  function setupPlaybackWorkflow() {
+    if (!window.location.pathname.includes("playback")) return;
+
+    function initWorkflowUI() {
+      const statusEl = document.getElementById("status");
+      const channelEl = document.getElementById("channel");
+      if (!statusEl || !channelEl) return;
+
+      // 1. Inject Top Playback Workflow Bar into #status
+      if (!document.getElementById("hik-playback-workflow-bar")) {
+        const bar = document.createElement("div");
+        bar.id = "hik-playback-workflow-bar";
+        bar.className = "hik-pb-workflow";
+        bar.innerHTML = `
+          <div class="hik-pb-group">
+            <span class="hik-pb-label">Mode:</span>
+            <div class="hik-pb-toggle" id="hik-pb-mode-toggle">
+              <button type="button" class="hik-pb-btn hik-pb-mode-sync" id="hik-btn-mode-sync" title="Synchronous Lockstep Playback (Multi-Grid Locked to 1 Universal Time)">
+                <span class="hik-pb-icon">🔗</span> Sync (Locked)
+              </button>
+              <button type="button" class="hik-pb-btn hik-pb-mode-async" id="hik-btn-mode-async" title="Independent Single-Grid Playback">
+                <span class="hik-pb-icon">🔀</span> Independent
+              </button>
+            </div>
+          </div>
+
+          <div class="hik-pb-divider"></div>
+
+          <div class="hik-pb-group">
+            <span class="hik-pb-label">Auto-Fill:</span>
+            <button type="button" class="hik-pb-btn" id="hik-btn-fill-4" title="1-Click Populate Cameras 1–4 into Grids 1–4">
+              ⚡ Fill 1–4
+            </button>
+            <button type="button" class="hik-pb-btn" id="hik-btn-fill-8" title="1-Click Populate Cameras 1–8 into 9-Grid">
+              ⚡ Fill 1–8
+            </button>
+            <button type="button" class="hik-pb-btn hik-pb-btn-clear" id="hik-btn-clear-all" title="Clear / Stop All Active Feeds">
+              ⏹ Clear
+            </button>
+          </div>
+
+          <div class="hik-pb-divider"></div>
+
+          <div class="hik-pb-group hik-pb-time-sync">
+            <span class="hik-pb-label">Sync Time:</span>
+            <div class="hik-pb-time-inputs">
+              <input type="text" maxlength="2" class="hik-pb-time-box" id="hik-pb-hour" placeholder="00" value="00" />
+              <span class="hik-pb-colon">:</span>
+              <input type="text" maxlength="2" class="hik-pb-time-box" id="hik-pb-min" placeholder="00" value="00" />
+              <span class="hik-pb-colon">:</span>
+              <input type="text" maxlength="2" class="hik-pb-time-box" id="hik-pb-sec" placeholder="00" value="00" />
+            </div>
+            <button type="button" class="hik-pb-btn hik-pb-sync-play" id="hik-btn-sync-play" title="Apply this timestamp to all active video grids and play in lockstep">
+              ▶ Play All in Sync
+            </button>
+          </div>
+        `;
+        statusEl.appendChild(bar);
+
+        // Bind Workflow Bar Event Listeners:
+        const btnSync = bar.querySelector("#hik-btn-mode-sync");
+        const btnAsync = bar.querySelector("#hik-btn-mode-async");
+        const btnFill4 = bar.querySelector("#hik-btn-fill-4");
+        const btnFill8 = bar.querySelector("#hik-btn-fill-8");
+        const btnClear = bar.querySelector("#hik-btn-clear-all");
+        const btnPlaySync = bar.querySelector("#hik-btn-sync-play");
+
+        function updateModeButtons() {
+          let isSync = false;
+          try {
+            const chScope = window.angular ? window.angular.element(document.querySelector("#channel")).scope() : null;
+            if (chScope && typeof chScope.bSyncPlayStatus === "boolean") {
+              isSync = chScope.bSyncPlayStatus;
+            } else {
+              const syncEl = document.querySelector(".sync-switch .sync");
+              isSync = syncEl ? syncEl.classList.contains("selected") : false;
+            }
+          } catch (e) {}
+          if (btnSync && btnAsync) {
+            btnSync.classList.toggle("active", isSync);
+            btnAsync.classList.toggle("active", !isSync);
+          }
+        }
+
+        function switchSyncMode(mode) {
+          try {
+            const pb = seajs.require("playback");
+            if (pb && pb.switchPlaySync) {
+              pb.switchPlaySync(mode);
+            }
+          } catch (e) {}
+          try {
+            const timebarEl = document.querySelector("#timebar");
+            if (timebarEl && window.angular) {
+              const tbScope = window.angular.element(timebarEl).scope();
+              const syncSwitch = document.querySelector(".sync-switch");
+              if (tbScope && tbScope.switchSync) {
+                const target = syncSwitch ? syncSwitch.querySelector(mode === 1 ? ".sync" : ".async") : null;
+                tbScope.switchSync({ target }, mode);
+                tbScope.$apply();
+              }
+            }
+          } catch (e) {}
+          setTimeout(updateModeButtons, 200);
+        }
+
+        btnSync.addEventListener("click", () => switchSyncMode(1));
+        btnAsync.addEventListener("click", () => switchSyncMode(0));
+
+        async function fillChannels(count) {
+          let isSync = false;
+          try {
+            const chScope = window.angular ? window.angular.element(document.querySelector("#channel")).scope() : null;
+            if (chScope && typeof chScope.bSyncPlayStatus === "boolean") {
+              isSync = chScope.bSyncPlayStatus;
+            } else {
+              const syncEl = document.querySelector(".sync-switch .sync");
+              isSync = syncEl ? syncEl.classList.contains("selected") : false;
+            }
+          } catch (e) {}
+
+          const pb = seajs.require("playback");
+          if (isSync) {
+            const chBoxes = document.querySelectorAll(".channel-list .ch .ch-check input");
+            const checkedIndices = [];
+            for (let i = 0; i < Math.min(count, chBoxes.length); i++) {
+              checkedIndices.push(i);
+              chBoxes[i].checked = true;
+              if (pb && pb.checkChannel) {
+                pb.checkChannel(checkedIndices.slice(), { iChannelIndex: i, bChecked: true });
+              }
+            }
+            const chScope = window.angular ? window.angular.element(document.querySelector("#channel")).scope() : null;
+            if (chScope) chScope.$apply();
+          } else {
+            const split = count <= 4 ? 4 : 9;
+            if (pb && pb.arrangeWndSplit) {
+              pb.arrangeWndSplit(split);
+            } else {
+              WindowManager.arrangeWindow(split === 4 ? 2 : 3);
+            }
+            const chNames = document.querySelectorAll(".channel-list .ch .ch-name");
+            for (let i = 0; i < Math.min(count, chNames.length); i++) {
+              WindowManager.selectWindow(i);
+              if (pb && pb.selectedChannel) {
+                pb.selectedChannel(i);
+              } else {
+                chNames[i]?.click();
+              }
+              await new Promise(r => setTimeout(r, 60));
+            }
+            WindowManager.selectWindow(0);
+          }
+        }
+
+        btnFill4.addEventListener("click", () => fillChannels(4));
+        btnFill8.addEventListener("click", () => fillChannels(8));
+
+        btnClear.addEventListener("click", () => {
+          WindowManager.stopAll();
+          try {
+            const pb = seajs.require("playback");
+            if (pb && pb.stopAll) pb.stopAll();
+          } catch (e) {}
+          const chBoxes = document.querySelectorAll(".channel-list .ch .ch-check input");
+          const chScope = window.angular ? window.angular.element(document.querySelector("#channel")).scope() : null;
+          chBoxes.forEach((b, idx) => {
+            if (b.checked) {
+              b.checked = false;
+              if (chScope && chScope.checkChannel) chScope.checkChannel(b, idx);
+            }
+          });
+          if (chScope) chScope.$apply();
+        });
+
+        btnPlaySync.addEventListener("click", async () => {
+          btnPlaySync.disabled = true;
+          const origText = btnPlaySync.innerHTML;
+          btnPlaySync.innerHTML = `<span class="hik-pb-icon">⏳</span> Syncing Feeds...`;
+
+          try {
+            const pb = seajs.require("playback");
+            const u = seajs.require("playback/search");
+            const d = seajs.require("playback/timebar");
+            if (!pb) return;
+
+            // Check if sync mode is active
+            let chScope = window.angular ? window.angular.element(document.querySelector("#channel")).scope() : null;
+            let isSync = chScope ? !!chScope.bSyncPlayStatus : false;
+
+            // 1. Ensure sync mode is active
+            if (!isSync) {
+              switchSyncMode(1);
+              updateModeButtons();
+              await new Promise(r => setTimeout(r, 1000));
+              chScope = window.angular ? window.angular.element(document.querySelector("#channel")).scope() : null;
+            }
+
+            // 2. Ensure channels are checked (default 1-4 if none checked)
+            const chBoxes = document.querySelectorAll(".channel-list .ch .ch-check input");
+            let checkedIndices = [];
+            chBoxes.forEach((b, idx) => {
+              if (b.checked) checkedIndices.push(idx);
+            });
+
+            if (checkedIndices.length === 0) {
+              for (let i = 0; i < Math.min(4, chBoxes.length); i++) {
+                checkedIndices.push(i);
+                chBoxes[i].checked = true;
+                pb.checkChannel(checkedIndices.slice(), { iChannelIndex: i, bChecked: true });
+              }
+              if (chScope) chScope.$apply();
+              await new Promise(r => setTimeout(r, 2200));
+            } else {
+              await new Promise(r => setTimeout(r, 600));
+            }
+
+            // 3. Assemble target time string
+            const h = (document.getElementById("hik-pb-hour")?.value || "00").padStart(2, "0");
+            const m = (document.getElementById("hik-pb-min")?.value || "00").padStart(2, "0");
+            const s = (document.getElementById("hik-pb-sec")?.value || "00").padStart(2, "0");
+            const calDate = (u && u.m_szCalendarDate) ? u.m_szCalendarDate : new Date().toISOString().slice(0, 10);
+            const targetTime = `${calDate} ${h}:${m}:${s}`;
+
+            console.log(`[Annke/Hikvision Bridge] Triggering Lockstep Sync Playback at: ${targetTime}`);
+            if (d && d.setMidLineTime) d.setMidLineTime(targetTime);
+
+            // 4. Start all sync playback
+            await pb.startAllSyncPlayback(targetTime);
+          } catch (err) {
+            console.error("[Annke/Hikvision Bridge] Sync playback error:", err);
+          } finally {
+            btnPlaySync.disabled = false;
+            btnPlaySync.innerHTML = origText;
+          }
+        });
+
+        // UX: Auto-advance time inputs and support Enter key to trigger Sync Playback
+        ["hik-pb-hour", "hik-pb-min", "hik-pb-sec"].forEach(id => {
+          const inputEl = bar.querySelector(`#${id}`);
+          if (inputEl) {
+            inputEl.addEventListener("keydown", (e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                btnPlaySync.click();
+              }
+            });
+            inputEl.addEventListener("input", () => {
+              if (inputEl.value.length >= 2) {
+                if (id === "hik-pb-hour") bar.querySelector("#hik-pb-min")?.focus();
+                else if (id === "hik-pb-min") bar.querySelector("#hik-pb-sec")?.focus();
+              }
+            });
+          }
+        });
+
+        // Periodic sync of mode buttons & time inputs
+        setInterval(() => {
+          updateModeButtons();
+          // Sync midline time to time inputs if user isn't typing
+          if (!document.activeElement?.classList.contains("hik-pb-time-box")) {
+            try {
+              const d = seajs.require("playback/timebar");
+              const tStr = d ? d.getPlayBackTime() : "";
+              if (tStr && tStr.includes(" ")) {
+                const parts = tStr.split(" ")[1].split(":");
+                if (parts.length === 3) {
+                  const hEl = document.getElementById("hik-pb-hour");
+                  const mEl = document.getElementById("hik-pb-min");
+                  const sEl = document.getElementById("hik-pb-sec");
+                  if (hEl && hEl.value !== parts[0]) hEl.value = parts[0];
+                  if (mEl && mEl.value !== parts[1]) mEl.value = parts[1];
+                  if (sEl && sEl.value !== parts[2]) sEl.value = parts[2];
+                }
+              }
+            } catch (e) {}
+          }
+        }, 1000);
+      }
+
+      // 2. Inject Left Sidebar Quick Action Bar into #channel
+      const chList = channelEl.querySelector(".channel-list");
+      if (chList && !document.getElementById("hik-channel-quick-bar")) {
+        const qBar = document.createElement("div");
+        qBar.id = "hik-channel-quick-bar";
+        qBar.className = "hik-ch-quick-bar";
+        qBar.innerHTML = `
+          <button type="button" class="hik-ch-quick-btn" id="hik-ch-sel-4" title="1-Click Select Cameras 1–4">⚡ Select 1–4</button>
+          <button type="button" class="hik-ch-quick-btn" id="hik-ch-sel-8" title="1-Click Select Cameras 1–8">⚡ 1–8</button>
+          <button type="button" class="hik-ch-quick-btn hik-ch-quick-clear" id="hik-ch-sel-clear" title="Deselect All">✕ Clear</button>
+        `;
+        chList.parentElement.insertBefore(qBar, chList);
+
+        qBar.querySelector("#hik-ch-sel-4")?.addEventListener("click", () => {
+          document.getElementById("hik-btn-fill-4")?.click();
+        });
+        qBar.querySelector("#hik-ch-sel-8")?.addEventListener("click", () => {
+          document.getElementById("hik-btn-fill-8")?.click();
+        });
+        qBar.querySelector("#hik-ch-sel-clear")?.addEventListener("click", () => {
+          document.getElementById("hik-btn-clear-all")?.click();
+        });
+      }
+
+      // 3. Auto-Advancing Channel Selection in Independent Mode
+      if (chList && !chList.__hikAutoAdvanceBound) {
+        chList.__hikAutoAdvanceBound = true;
+        chList.addEventListener("click", (evt) => {
+          if (!evt.isTrusted) return;
+
+          let isSync = false;
+          try {
+            const chScope = window.angular ? window.angular.element(document.querySelector("#channel")).scope() : null;
+            if (chScope && typeof chScope.bSyncPlayStatus === "boolean") {
+              isSync = chScope.bSyncPlayStatus;
+            } else {
+              const syncEl = document.querySelector(".sync-switch .sync");
+              isSync = syncEl ? syncEl.classList.contains("selected") : false;
+            }
+          } catch (e) {}
+          if (isSync) return; // In sync mode, checkboxes are used
+
+          const chNameEl = evt.target.closest(".ch-name");
+          if (!chNameEl) return;
+
+          // After channel is assigned to current window, advance to next window
+          setTimeout(() => {
+            const totalSlots = WindowManager.splitMode * WindowManager.splitMode;
+            const nextIdx = (WindowManager.selectedWndIndex + 1) % totalSlots;
+            console.log(`[Annke/Hikvision Bridge] Auto-advancing window selection to ${nextIdx} of ${totalSlots}`);
+            WindowManager.selectWindow(nextIdx);
+          }, 120);
+        });
+      }
+    }
+
+    // Set up observer to inject when templates load
+    const observer = new MutationObserver(() => {
+      initWorkflowUI();
+    });
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    initWorkflowUI();
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", setupPluginCleaner);
+    document.addEventListener("DOMContentLoaded", () => {
+      setupPluginCleaner();
+      setupPlaybackWorkflow();
+    });
   } else {
     setupPluginCleaner();
+    setupPlaybackWorkflow();
   }
 
   // =========================================================================
@@ -1475,6 +1902,174 @@
       .hik-act-btn.hik-act-stream:hover {
         background: #2196F3;
         color: #fff;
+      }
+
+      /* Playback Workflow Bar Styles */
+      .playback #status {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        height: 38px !important;
+        padding: 0 12px !important;
+        background: #1b1b1b !important;
+        border-bottom: 1px solid #2e2e2e !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+      }
+      .playback #status .channel-no,
+      .playback #status .current-status {
+        float: none !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        height: auto !important;
+        line-height: normal !important;
+        font-size: 12px !important;
+        color: #ccc !important;
+        white-space: nowrap !important;
+      }
+      .playback #status .channel-no {
+        margin-right: 14px !important;
+      }
+      .playback #status .current-status {
+        margin-right: auto !important;
+      }
+      .hik-pb-workflow {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+      }
+      .hik-pb-group {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .hik-pb-label {
+        color: #888;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .hik-pb-divider {
+        width: 1px;
+        height: 18px;
+        background: #333;
+      }
+      .hik-pb-toggle {
+        display: inline-flex;
+        background: #111;
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 1px;
+      }
+      .hik-pb-btn {
+        background: #2b2b2b;
+        color: #ddd;
+        border: 1px solid #444;
+        border-radius: 3px;
+        padding: 3px 8px;
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        user-select: none;
+      }
+      .hik-pb-btn:hover {
+        background: #3a3a3a;
+        border-color: #666;
+        color: #fff;
+      }
+      .hik-pb-toggle .hik-pb-btn {
+        border: none;
+        border-radius: 3px;
+        padding: 2px 7px;
+        background: transparent;
+        color: #888;
+      }
+      .hik-pb-toggle .hik-pb-btn.active {
+        background: #1976D2 !important;
+        color: #fff !important;
+        font-weight: 600;
+        box-shadow: 0 0 6px rgba(33, 150, 243, 0.4);
+      }
+      .hik-pb-btn-clear:hover {
+        background: #c62828 !important;
+        border-color: #e53935 !important;
+        color: #fff !important;
+      }
+      .hik-pb-time-inputs {
+        display: flex;
+        align-items: center;
+        background: #111;
+        border: 1px solid #444;
+        border-radius: 3px;
+        padding: 1px 4px;
+      }
+      .hik-pb-time-box {
+        width: 22px;
+        background: transparent;
+        border: none;
+        color: #00e676;
+        font-family: monospace;
+        font-size: 12px;
+        font-weight: bold;
+        text-align: center;
+        outline: none;
+      }
+      .hik-pb-colon {
+        color: #666;
+        font-weight: bold;
+      }
+      .hik-pb-sync-play {
+        background: #2e7d32;
+        border-color: #43a047;
+        color: #fff;
+        font-weight: 600;
+      }
+      .hik-pb-sync-play:hover {
+        background: #388e3c;
+        border-color: #4caf50;
+        color: #fff;
+        box-shadow: 0 0 6px rgba(76, 175, 80, 0.4);
+      }
+
+      /* Sidebar Quick Bar */
+      .hik-ch-quick-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px;
+        padding: 6px 8px;
+        background: #202020;
+        border-bottom: 1px solid #333;
+        box-sizing: border-box;
+      }
+      .hik-ch-quick-btn {
+        flex: 1;
+        background: #2c2c2c;
+        color: #ccc;
+        border: 1px solid #444;
+        border-radius: 3px;
+        padding: 4px 2px;
+        font-size: 11px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        user-select: none;
+      }
+      .hik-ch-quick-btn:hover {
+        background: #1976D2;
+        border-color: #2196F3;
+        color: #fff;
+      }
+      .hik-ch-quick-clear:hover {
+        background: #c62828 !important;
+        border-color: #e53935 !important;
+        color: #fff !important;
       }
     `;
     (document.head || document.documentElement).appendChild(style);

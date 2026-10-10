@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome%20Extension-Manifest%20V3-brightgreen.svg)](extension/manifest.json)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-orange.svg)](#)
-[![Version](https://img.shields.io/badge/Release-v1.1.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/Release-v1.2.0-blue.svg)](#)
 
 A modern, cross-platform **Manifest V3 WebExtension** that seamlessly translates and virtualizes Hikvision & Annke's legacy plugin protocol (`LocalServiceComponents.exe` / `WebComponents.exe` / NPAPI) into native **HTML5 Canvas and WebCodecs** directly inside modern web browsers.
 
@@ -57,6 +57,14 @@ This extension completely eliminates the need for any native installer or backgr
 
 - **🚀 100% Native In-Browser Execution**:
   No Wine, no external Python/Node daemons, no Windows virtual machines. Works seamlessly on Linux, macOS, ChromeOS, and Windows.
+- **⏱️ Synchronized Multi-Grid Playback (Lockstep 1-Time Sync)**:
+  Eliminates independent playback drift across multi-camera layouts. In 4-split or 9-split grids, pick a single universal timestamp (`[ 🕒 HH : MM : SS ]`) and click **▶ Play All in Sync** to launch all active camera grids simultaneously in lockstep at razor-sharp 1080p Full HD.
+- **⚡ 1-Click Playback Auto-Fill (`⚡ Fill 1–4`, `⚡ Fill 1–8`)**:
+  Eliminates tedious manual click cycles. Automatically selects channels, provisions multi-split grids, and assigns camera feeds in a single click from the playback toolbar or sidebar quick bar.
+- **⏩ Auto-Advancing Channel Selection (Independent Mode)**:
+  Assigning a channel to the active grid tile in Independent mode automatically advances focus to the next available window slot, allowing rapid sequential assignment without manual tile re-selection.
+- **⏹ 1-Click Clear / Stop**:
+  Instantly halts all active playback feeds and resets channel checkboxes with a single click.
 - **🎛️ ZeroChannel Multi-View Composite Matrix**:
   Selecting **ZeroChannel 01** renders an authentic 8-camera multi-view composite matrix (3x3 grid) with live camera headers, timestamps, and status overview, accurately replicating the NVR's hardware zero-channel without displaying single-camera channel 1.
 - **📺 True Full HD (1080p) Main Stream**:
@@ -105,8 +113,6 @@ This extension completely eliminates the need for any native installer or backgr
   All 8 camera feeds in the ZeroChannel composite multi-view stream concurrently in parallel instead of one-by-one round-robin.
 - **🛑 Zero Accidental Auto-Play**:
   Default configuration suppresses unwanted startup streams (`realPlayAll: "0"`), loading into a clean idle grid until you choose what to watch.
-- **⏪ Playback & Time Synchronization**:
-  Emulates `video.getOSDTime` and `video.getPlayInfo`, enabling the timeline scrubber and playback controls on `/doc/page/playback.asp`.
 - **📸 Fullscreen & Recording**:
   Synchronizes fullscreen states with the NVR bottom toolbar and supports live WebM clip recording via `MediaRecorder`.
 
@@ -132,7 +138,7 @@ This extension completely eliminates the need for any native installer or backgr
 
 ### Pre-Packaged Zip Release
 
-Download `annke-hikvision-bridge-v1.1.0.zip` (or `hikvision-web-plugin-translator-v1.1.0.zip`) from Releases, unzip it, and use **Load unpacked** pointing to the extracted folder.
+Download `annke-hikvision-bridge-v1.2.0.zip` (or `hikvision-web-plugin-translator-v1.2.0.zip`) from Releases, unzip it, and use **Load unpacked** pointing to the extracted folder.
 
 ---
 
