@@ -151,6 +151,29 @@
         WindowManager.stop(wndIndex);
         return Promise.resolve();
       };
+      inst.JS_Pause = function (wndIndex) {
+        WindowManager.pause(wndIndex);
+        return Promise.resolve();
+      };
+      inst.JS_Resume = function (wndIndex) {
+        WindowManager.resume(wndIndex);
+        return Promise.resolve();
+      };
+      inst.JS_Fast = function (wndIndex) {
+        WindowManager.fast(wndIndex);
+        return Promise.resolve();
+      };
+      inst.JS_Slow = function (wndIndex) {
+        WindowManager.slow(wndIndex);
+        return Promise.resolve();
+      };
+      inst.JS_FrameForward = function (wndIndex) {
+        WindowManager.frame(wndIndex);
+        return Promise.resolve();
+      };
+      inst.JS_GetOSDTime = function (wndIndex) {
+        return Promise.resolve(WindowManager.getPlaybackOSDTime(wndIndex));
+      };
       inst.JS_ArrangeWindow = function (split, custom) {
         WindowManager.arrangeWindow(split);
         return Promise.resolve();
@@ -169,6 +192,29 @@
           inst.oPlugin.JS_Stop = function (wnd) {
             WindowManager.stop(wnd);
             return Promise.resolve();
+          };
+          inst.oPlugin.JS_Pause = function (wnd) {
+            WindowManager.pause(wnd);
+            return Promise.resolve();
+          };
+          inst.oPlugin.JS_Resume = function (wnd) {
+            WindowManager.resume(wnd);
+            return Promise.resolve();
+          };
+          inst.oPlugin.JS_Fast = function (wnd) {
+            WindowManager.fast(wnd);
+            return Promise.resolve();
+          };
+          inst.oPlugin.JS_Slow = function (wnd) {
+            WindowManager.slow(wnd);
+            return Promise.resolve();
+          };
+          inst.oPlugin.JS_FrameForward = function (wnd) {
+            WindowManager.frame(wnd);
+            return Promise.resolve();
+          };
+          inst.oPlugin.JS_GetOSDTime = function (wnd) {
+            return Promise.resolve(WindowManager.getPlaybackOSDTime(wnd));
           };
           inst.oPlugin.JS_ArrangeWindow = function (split, custom) {
             WindowManager.arrangeWindow(split);
@@ -249,6 +295,98 @@
     } catch (e) {
       console.warn("[Annke/Hikvision Bridge] Error saving local config:", e);
       return newCfg;
+    }
+  }
+
+  class PlaybackClock {
+    constructor(initialTime) {
+      this.baseTime = this.parseTimeToUnix(initialTime);
+      this.startWallTime = performance.now();
+      this.speed = 1.0;
+      this.isPaused = false;
+      this.pauseWallTime = 0;
+    }
+
+    parseTimeToUnix(str) {
+      if (!str) return Math.floor(Date.now() / 1000);
+      if (typeof str === "number") return Math.floor(str);
+      const s = String(str).trim();
+      // 1. yyyyMMddThhmmssZ
+      const m1 = s.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/i);
+      if (m1) {
+        const d = new Date(+m1[1], +m1[2] - 1, +m1[3], +m1[4], +m1[5], +m1[6]);
+        return Math.floor(d.getTime() / 1000);
+      }
+      // 2. yyyy-MM-dd hh:mm:ss
+      const m2 = s.match(/^(\d{4})[-/](\d{2})[-/](\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+      if (m2) {
+        const d = new Date(+m2[1], +m2[2] - 1, +m2[3], +m2[4], +m2[5], +m2[6]);
+        return Math.floor(d.getTime() / 1000);
+      }
+      const parsed = Date.parse(s.replace(/-/g, "/"));
+      if (!isNaN(parsed)) return Math.floor(parsed / 1000);
+      return Math.floor(Date.now() / 1000);
+    }
+
+    setTime(timeStrOrUnix) {
+      this.baseTime = typeof timeStrOrUnix === "number" ? Math.floor(timeStrOrUnix) : this.parseTimeToUnix(timeStrOrUnix);
+      this.startWallTime = performance.now();
+      this.isPaused = false;
+      this.pauseWallTime = 0;
+    }
+
+    getTime() {
+      if (!this.baseTime) return Math.floor(Date.now() / 1000);
+      if (this.isPaused) {
+        const pausedElapsed = (this.pauseWallTime - this.startWallTime) / 1000;
+        return Math.floor(this.baseTime + pausedElapsed * this.speed);
+      }
+      const elapsed = (performance.now() - this.startWallTime) / 1000;
+      return Math.floor(this.baseTime + elapsed * this.speed);
+    }
+
+    pause() {
+      if (!this.isPaused) {
+        this.isPaused = true;
+        this.pauseWallTime = performance.now();
+      }
+    }
+
+    resume() {
+      if (this.isPaused) {
+        const pauseDuration = performance.now() - this.pauseWallTime;
+        this.startWallTime += pauseDuration;
+        this.isPaused = false;
+      }
+    }
+
+    fast() {
+      const cur = this.getTime();
+      this.baseTime = cur;
+      this.startWallTime = performance.now();
+      this.speed = Math.min(4.0, (this.speed || 1.0) * 2);
+    }
+
+    slow() {
+      const cur = this.getTime();
+      this.baseTime = cur;
+      this.startWallTime = performance.now();
+      this.speed = Math.max(0.25, (this.speed || 1.0) / 2);
+    }
+
+    stepFrame() {
+      const cur = this.getTime();
+      this.baseTime = cur + 1;
+      this.startWallTime = performance.now();
+      this.pauseWallTime = performance.now();
+      this.isPaused = true;
+    }
+
+    getTimeFormatted() {
+      const u = this.getTime();
+      const d = new Date(u * 1000);
+      const pad = n => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
   }
 
@@ -474,12 +612,23 @@
         osdRes,
         player,
         isPlaying: false,
+        playbackClock: null,
         channelId: null
       };
 
       player.onStats = (stats) => {
         if (entry.osdRes && entry.isPlaying) {
-          entry.osdRes.textContent = `${stats.width}x${stats.height} [${stats.quality || "HD"}]${stats.fps ? ` • ${stats.fps}fps` : ""}`;
+          let extra = "";
+          if (entry.playbackClock) {
+            const unix = entry.playbackClock.getTime();
+            const d = new Date(unix * 1000);
+            const pad = n => String(n).padStart(2, "0");
+            extra = ` • ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+            if (entry.playbackClock.speed !== 1.0) {
+              extra += ` (${entry.playbackClock.speed}X)`;
+            }
+          }
+          entry.osdRes.textContent = `${stats.width}x${stats.height} [${stats.quality || "HD"}]${stats.fps ? ` • ${stats.fps}fps` : ""}${extra}`;
         }
       };
 
@@ -670,8 +819,12 @@
         if (realChannel >= 3300) {
           realChannel = (Math.floor(realChannel / 100) - 32) * 100 + (realChannel % 100);
         }
-        const chStr = String(realChannel);
-        const isSub = chStr.endsWith("2") || (options.streamType === "sub");
+        let chStr = String(realChannel);
+        // Multi-grid playback (splitMode >= 2): default to Sub-Stream unless explicitly main
+        const isSub = (this.splitMode >= 2 && options.streamType !== "main") || chStr.endsWith("2") || (options.streamType === "sub");
+        if (isSub && !chStr.endsWith("2")) {
+          chStr = String(Math.floor(realChannel / 100) * 100 + 2);
+        }
         return {
           channelId: chStr,
           channelName: this.resolveChannelName(chStr),
@@ -696,6 +849,12 @@
         c = (Math.floor(c / 100) - 32) * 100 + (c % 100);
       } else if (c < 100) {
         c = c * 100 + (options.streamType === "sub" ? 2 : 1);
+      }
+
+      if (this.splitMode >= 2 && options.streamType !== "main" && window.location.pathname.includes("playback")) {
+        if (!String(c).endsWith("2")) {
+          c = Math.floor(c / 100) * 100 + 2;
+        }
       }
 
       const channelId = String(c);
@@ -728,7 +887,36 @@
 
       const chLabel = parsed.channelName || this.resolveChannelName(activeChannel);
       if (entry.osdTitle) entry.osdTitle.textContent = chLabel;
-      if (entry.osdBadge) entry.osdBadge.classList.add("live");
+
+      const isPlayback = window.location.pathname.includes("playback") || !!options.startTime || !!options.targetTime;
+      if (isPlayback) {
+        let startTime = options.startTime || options.targetTime;
+        if (!startTime) {
+          try {
+            const d = seajs.require("playback/timebar");
+            startTime = d ? d.getPlayBackTime() : "";
+          } catch (e) {}
+        }
+        if (!startTime) {
+          const h = (document.getElementById("hik-pb-hour")?.value || "00").padStart(2, "0");
+          const m = (document.getElementById("hik-pb-min")?.value || "00").padStart(2, "0");
+          const s = (document.getElementById("hik-pb-sec")?.value || "00").padStart(2, "0");
+          startTime = `${new Date().toISOString().slice(0, 10)} ${h}:${m}:${s}`;
+        }
+        entry.playbackClock = new PlaybackClock(startTime);
+        if (entry.osdBadge) {
+          entry.osdBadge.textContent = "PLAY";
+          entry.osdBadge.classList.add("playback");
+          entry.osdBadge.classList.remove("live");
+        }
+      } else {
+        entry.playbackClock = null;
+        if (entry.osdBadge) {
+          entry.osdBadge.textContent = "LIVE";
+          entry.osdBadge.classList.add("live");
+          entry.osdBadge.classList.remove("playback");
+        }
+      }
 
       // Update stream quality button on the tile
       const qualityBtn = entry.cellEl.querySelector("[data-act='stream-quality']");
@@ -748,11 +936,66 @@
       const streamOptions = Object.assign({}, options, {
         channel: activeChannel,
         streamType: parsed.streamType,
-        isZeroChannel: isZero
+        isZeroChannel: isZero,
+        splitMode: this.splitMode
       });
 
       entry.player.play(streamUrl, streamOptions);
       this.selectWindow(wndIndex);
+    },
+
+    pause(wndIndex) {
+      wndIndex = parseInt(wndIndex, 10) || 0;
+      const entry = this.cells.get(wndIndex);
+      if (entry) {
+        if (entry.player && typeof entry.player.pause === "function") entry.player.pause();
+        if (entry.playbackClock) entry.playbackClock.pause();
+        if (entry.osdBadge) entry.osdBadge.textContent = "PAUSED";
+      }
+    },
+
+    resume(wndIndex) {
+      wndIndex = parseInt(wndIndex, 10) || 0;
+      const entry = this.cells.get(wndIndex);
+      if (entry) {
+        if (entry.player && typeof entry.player.resume === "function") entry.player.resume();
+        if (entry.playbackClock) entry.playbackClock.resume();
+        if (entry.osdBadge) entry.osdBadge.textContent = "PLAY";
+      }
+    },
+
+    fast(wndIndex) {
+      wndIndex = parseInt(wndIndex, 10) || 0;
+      const entry = this.cells.get(wndIndex);
+      if (entry && entry.playbackClock) {
+        entry.playbackClock.fast();
+      }
+    },
+
+    slow(wndIndex) {
+      wndIndex = parseInt(wndIndex, 10) || 0;
+      const entry = this.cells.get(wndIndex);
+      if (entry && entry.playbackClock) {
+        entry.playbackClock.slow();
+      }
+    },
+
+    frame(wndIndex) {
+      wndIndex = parseInt(wndIndex, 10) || 0;
+      const entry = this.cells.get(wndIndex);
+      if (entry) {
+        if (entry.playbackClock) entry.playbackClock.stepFrame();
+        if (entry.osdBadge) entry.osdBadge.textContent = "FRAME";
+      }
+    },
+
+    getPlaybackOSDTime(wndIndex) {
+      wndIndex = parseInt(wndIndex, 10) || 0;
+      const entry = this.cells.get(wndIndex);
+      if (entry && entry.playbackClock) {
+        return entry.playbackClock.getTime();
+      }
+      return Math.floor(Date.now() / 1000);
     },
 
     stop(wndIndex) {
@@ -760,10 +1003,15 @@
       const entry = this.cells.get(wndIndex);
       if (entry) {
         entry.isPlaying = false;
+        entry.playbackClock = null;
         entry.cellEl.classList.remove("playing");
         entry.player.stop();
         if (entry.osdTitle) entry.osdTitle.textContent = `Window ${wndIndex + 1}`;
-        if (entry.osdBadge) entry.osdBadge.classList.remove("live");
+        if (entry.osdBadge) {
+          entry.osdBadge.classList.remove("live");
+          entry.osdBadge.classList.remove("playback");
+          entry.osdBadge.textContent = "";
+        }
         if (entry.osdRes) entry.osdRes.textContent = "";
       }
     },
@@ -837,7 +1085,7 @@
             <span class="hik-pb-label">Mode:</span>
             <div class="hik-pb-toggle" id="hik-pb-mode-toggle">
               <button type="button" class="hik-pb-btn hik-pb-mode-sync" id="hik-btn-mode-sync" title="Synchronous Lockstep Playback (Multi-Grid Locked to 1 Universal Time)">
-                <span class="hik-pb-icon">🔗</span> Sync (Locked)
+                <span class="hik-pb-icon">🔗</span> Sync
               </button>
               <button type="button" class="hik-pb-btn hik-pb-mode-async" id="hik-btn-mode-async" title="Independent Single-Grid Playback">
                 <span class="hik-pb-icon">🔀</span> Independent
@@ -848,7 +1096,6 @@
           <div class="hik-pb-divider"></div>
 
           <div class="hik-pb-group">
-            <span class="hik-pb-label">Auto-Fill:</span>
             <button type="button" class="hik-pb-btn" id="hik-btn-fill-4" title="1-Click Populate Cameras 1–4 into Grids 1–4">
               ⚡ Fill 1–4
             </button>
@@ -862,8 +1109,13 @@
 
           <div class="hik-pb-divider"></div>
 
+          <div class="hik-pb-group">
+            <span class="hik-pb-date-badge" id="hik-pb-cur-date">📅 Today</span>
+          </div>
+
+          <div class="hik-pb-divider"></div>
+
           <div class="hik-pb-group hik-pb-time-sync">
-            <span class="hik-pb-label">Sync Time:</span>
             <div class="hik-pb-time-inputs">
               <input type="text" maxlength="2" class="hik-pb-time-box" id="hik-pb-hour" placeholder="00" value="00" />
               <span class="hik-pb-colon">:</span>
@@ -871,8 +1123,14 @@
               <span class="hik-pb-colon">:</span>
               <input type="text" maxlength="2" class="hik-pb-time-box" id="hik-pb-sec" placeholder="00" value="00" />
             </div>
+            <div class="hik-pb-chips">
+              <button type="button" class="hik-pb-chip" data-time="00:00:00" title="Set to 00:00 (Midnight)">00:00</button>
+              <button type="button" class="hik-pb-chip" data-time="06:00:00" title="Set to 06:00 (Morning)">06:00</button>
+              <button type="button" class="hik-pb-chip" data-time="12:00:00" title="Set to 12:00 (Noon)">12:00</button>
+              <button type="button" class="hik-pb-chip" data-time="18:00:00" title="Set to 18:00 (Evening)">18:00</button>
+            </div>
             <button type="button" class="hik-pb-btn hik-pb-sync-play" id="hik-btn-sync-play" title="Apply this timestamp to all active video grids and play in lockstep">
-              ▶ Play All in Sync
+              ▶ Play Sync
             </button>
           </div>
         `;
@@ -885,6 +1143,28 @@
         const btnFill8 = bar.querySelector("#hik-btn-fill-8");
         const btnClear = bar.querySelector("#hik-btn-clear-all");
         const btnPlaySync = bar.querySelector("#hik-btn-sync-play");
+
+        // Quick Preset Chips:
+        bar.querySelectorAll(".hik-pb-chip").forEach(chip => {
+          chip.addEventListener("click", () => {
+            const timeStr = chip.getAttribute("data-time") || "00:00:00";
+            const parts = timeStr.split(":");
+            const hEl = bar.querySelector("#hik-pb-hour");
+            const mEl = bar.querySelector("#hik-pb-min");
+            const sEl = bar.querySelector("#hik-pb-sec");
+            if (hEl) hEl.value = parts[0];
+            if (mEl) mEl.value = parts[1];
+            if (sEl) sEl.value = parts[2];
+
+            try {
+              const u = seajs.require("playback/search");
+              const d = seajs.require("playback/timebar");
+              const calDate = (u && u.m_szCalendarDate) ? u.m_szCalendarDate : new Date().toISOString().slice(0, 10);
+              const fullTargetTime = `${calDate} ${timeStr}`;
+              if (d && d.setMidLineTime) d.setMidLineTime(fullTargetTime);
+            } catch (e) {}
+          });
+        });
 
         function updateModeButtons() {
           let isSync = false;
@@ -1046,6 +1326,13 @@
             console.log(`[Annke/Hikvision Bridge] Triggering Lockstep Sync Playback at: ${targetTime}`);
             if (d && d.setMidLineTime) d.setMidLineTime(targetTime);
 
+            // Sync all active windows' PlaybackClock instances
+            WindowManager.cells.forEach(entry => {
+              if (entry.playbackClock) {
+                entry.playbackClock.setTime(targetTime);
+              }
+            });
+
             // 4. Start all sync playback
             await pb.startAllSyncPlayback(targetTime);
           } catch (err) {
@@ -1075,9 +1362,17 @@
           }
         });
 
-        // Periodic sync of mode buttons & time inputs
+        // Periodic sync of mode buttons, calendar date, & time inputs
         setInterval(() => {
           updateModeButtons();
+          try {
+            const u = seajs.require("playback/search");
+            const dateEl = document.getElementById("hik-pb-cur-date");
+            if (dateEl && u && u.m_szCalendarDate) {
+              dateEl.textContent = `📅 ${u.m_szCalendarDate}`;
+            }
+          } catch (e) {}
+
           // Sync midline time to time inputs if user isn't typing
           if (!document.activeElement?.classList.contains("hik-pb-time-box")) {
             try {
@@ -1369,7 +1664,42 @@
 
         case "video.pause":
         case "pause": {
-          WindowManager.stop(wndIndex);
+          WindowManager.pause(wndIndex);
+          break;
+        }
+
+        case "video.resume":
+        case "resume": {
+          WindowManager.resume(wndIndex);
+          break;
+        }
+
+        case "video.fast":
+        case "fast": {
+          WindowManager.fast(wndIndex);
+          break;
+        }
+
+        case "video.slow":
+        case "slow": {
+          WindowManager.slow(wndIndex);
+          break;
+        }
+
+        case "video.frame":
+        case "frame": {
+          WindowManager.frame(wndIndex);
+          break;
+        }
+
+        case "video.seek":
+        case "seek": {
+          if (msg.startTime) {
+            const entry = WindowManager.cells.get(wndIndex);
+            if (entry && entry.playbackClock) {
+              entry.playbackClock.setTime(msg.startTime);
+            }
+          }
           break;
         }
 
@@ -1404,7 +1734,7 @@
 
         case "video.getOSDTime":
         case "getOSDTime": {
-          response.osdTime = Math.floor(Date.now() / 1000);
+          response.osdTime = WindowManager.getPlaybackOSDTime(wndIndex);
           break;
         }
 
@@ -1437,12 +1767,6 @@
           break;
         }
 
-        case "video.resume":
-        case "resume":
-        case "video.seek":
-        case "video.slow":
-        case "video.fast":
-        case "video.frame":
         case "video.reversePlay":
         case "video.setPlayBackType":
         case "video.setPlaybackDrawType":
@@ -1802,15 +2126,31 @@
         box-shadow: 0 2px 4px rgba(0,0,0,0.5);
       }
       .hik-wnd-badge {
-        display: inline-block;
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: #757575;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        line-height: normal;
+        background: #424242;
+        color: #fff;
+        text-transform: uppercase;
+      }
+      .hik-wnd-badge:empty {
+        display: none;
       }
       .hik-wnd-badge.live {
-        background: #00e676;
-        box-shadow: 0 0 6px #00e676;
+        background: #00c853;
+        box-shadow: 0 0 6px rgba(0, 200, 83, 0.6);
+        color: #fff;
+      }
+      .hik-wnd-badge.playback {
+        background: #0288d1;
+        box-shadow: 0 0 6px rgba(2, 136, 209, 0.6);
+        color: #fff;
       }
       .hik-wnd-res {
         color: #aaa;
@@ -1918,25 +2258,12 @@
       }
       .playback #status .channel-no,
       .playback #status .current-status {
-        float: none !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        height: auto !important;
-        line-height: normal !important;
-        font-size: 12px !important;
-        color: #ccc !important;
-        white-space: nowrap !important;
-      }
-      .playback #status .channel-no {
-        margin-right: 14px !important;
-      }
-      .playback #status .current-status {
-        margin-right: auto !important;
+        display: none !important;
       }
       .hik-pb-workflow {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         font-family: Arial, sans-serif;
         font-size: 12px;
       }
@@ -1977,6 +2304,7 @@
         align-items: center;
         gap: 4px;
         user-select: none;
+        white-space: nowrap !important;
       }
       .hik-pb-btn:hover {
         background: #3a3a3a;
@@ -2035,6 +2363,41 @@
         border-color: #4caf50;
         color: #fff;
         box-shadow: 0 0 6px rgba(76, 175, 80, 0.4);
+      }
+      .hik-pb-date-badge {
+        display: inline-flex;
+        align-items: center;
+        background: #111;
+        border: 1px solid #444;
+        border-radius: 3px;
+        padding: 2px 7px;
+        color: #ffb74d;
+        font-family: monospace;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+      }
+      .hik-pb-chips {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+      }
+      .hik-pb-chip {
+        background: #242424;
+        color: #aaa;
+        border: 1px solid #3d3d3d;
+        border-radius: 3px;
+        padding: 2px 6px;
+        font-family: monospace;
+        font-size: 10px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .hik-pb-chip:hover {
+        background: #1976D2;
+        border-color: #2196F3;
+        color: #fff;
       }
 
       /* Sidebar Quick Bar */

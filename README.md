@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome%20Extension-Manifest%20V3-brightgreen.svg)](extension/manifest.json)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-orange.svg)](#)
-[![Version](https://img.shields.io/badge/Release-v1.2.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/Release-v1.2.1-blue.svg)](#)
 
 A modern, cross-platform **Manifest V3 WebExtension** that seamlessly translates and virtualizes Hikvision & Annke's legacy plugin protocol (`LocalServiceComponents.exe` / `WebComponents.exe` / NPAPI) into native **HTML5 Canvas and WebCodecs** directly inside modern web browsers.
 
@@ -45,6 +45,9 @@ This extension completely eliminates the need for any native installer or backgr
 │  - ZeroChannel 01: Authentic 8-CH Composite Multi-View │
 │  - Full HD 1080p Main Stream (Channel 101/201/...)     │
 │  - Authentic Fluent Sub-Stream (Channel 102/202/...)   │
+│  - Virtual Playback Clock & Lockstep Time Sync         │
+│  - Pipelined Multi-Worker Stream Engine (10-15+ FPS)   │
+│  - Pause/Resume State Machine (Retains Canvas Frame)   │
 │  - Interactive Window Focus (Highlight & Route)        │
 │  - Tile Quick Actions ([HD]/[SD], Snapshot, Zoom, Stop)│
 │  - WebCodecs / HTML5 Canvas Hardware Accelerated Video │
@@ -57,8 +60,14 @@ This extension completely eliminates the need for any native installer or backgr
 
 - **🚀 100% Native In-Browser Execution**:
   No Wine, no external Python/Node daemons, no Windows virtual machines. Works seamlessly on Linux, macOS, ChromeOS, and Windows.
-- **⏱️ Synchronized Multi-Grid Playback (Lockstep 1-Time Sync)**:
-  Eliminates independent playback drift across multi-camera layouts. In 4-split or 9-split grids, pick a single universal timestamp (`[ 🕒 HH : MM : SS ]`) and click **▶ Play All in Sync** to launch all active camera grids simultaneously in lockstep at razor-sharp 1080p Full HD.
+- **⚡ High-Framerate Playback Engine (10–15+ FPS)**:
+  Overcomes the legacy single-request ~2 FPS slideshow bottleneck via an asynchronous multi-worker pipelining architecture with immediate Basic Authentication headers, zero-frame-dropping dispatch, and sub-stream multi-grid concurrency optimization delivering up to 15.5 FPS aggregate throughput without overloading the NVR.
+- **⏱️ Synchronized Multi-Grid Playback & Virtual Playback Clock**:
+  Eliminates timeline jumping and multi-camera drift. A dedicated `PlaybackClock` virtual timekeeper feeds `video.getOSDTime`, locking the Hikvision `timebar.js` timeline needle strictly to the recorded timestamp rather than jumping violently to live wall-clock time.
+- **⏸️ Canvas-Preserving Pause State Machine**:
+  Pausing a playback stream now seamlessly retains the current video frame on the HTML5 canvas rather than wiping to a black screen, with immediate resume capability on unpause.
+- **🕒 Quick Time Preset Chips & Calendar Date Sync**:
+  One-click preset chips (`[ 00:00 ]`, `[ 06:00 ]`, `[ 12:00 ]`, `[ 18:00 ]`) instantly snap both time inputs and the timeline needle to landmark points of the selected calendar day.
 - **⚡ 1-Click Playback Auto-Fill (`⚡ Fill 1–4`, `⚡ Fill 1–8`)**:
   Eliminates tedious manual click cycles. Automatically selects channels, provisions multi-split grids, and assigns camera feeds in a single click from the playback toolbar or sidebar quick bar.
 - **⏩ Auto-Advancing Channel Selection (Independent Mode)**:

@@ -189,6 +189,7 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
       this.decoder = null;
       this.abortController = null;
       this.isPlaying = false;
+      this.isPaused = false;
       this.sessionId = 0;
       this.codecConfigured = false;
       this.hasReceivedKeyFrame = false;
@@ -196,6 +197,7 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
       this.fps = 0;
       this.lastFpsTime = performance.now();
       this.frameCount = 0;
+      this.totalFrames = 0;
       this.statusText = "Initializing...";
 
       // Digital zoom / pan state
@@ -328,6 +330,7 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
       this.ctx.restore();
 
       this.frameCount++;
+      this.totalFrames++;
       const now = performance.now();
       if (now - this.lastFpsTime >= 1000) {
         this.fps = Math.round(
@@ -493,6 +496,7 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
       this.ctx.restore();
 
       this.frameCount++;
+      this.totalFrames++;
       const now = performance.now();
       if (dimensionsChanged && typeof this.onStats === "function") {
         this.onStats({
@@ -519,7 +523,7 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
       }
     }
 
-    async startSnapshotStream(channel, origin, credentials, streamType = "auto", session = this.sessionId) {
+    async startSnapshotStream(channel, origin, credentials, streamType = "auto", session = this.sessionId, options = {}) {
       if (channel === "0" || streamType === "zero") {
         return this.startZeroChannelStream(origin, credentials, session);
       }
@@ -543,11 +547,9 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
       this.drawStatus(`Connecting to Camera Channel ${channel} (${this.currentQuality})...`);
 
       // Multi-worker pipelined stream engine:
-      // Overcomes NVR single-request latency (~300ms) by keeping concurrent requests
-      // in flight with strict monotonic sequence ordering. Delivers 10-15 FPS.
-      const CONCURRENCY = isMain ? 3 : 4;
-      let nextSeq = 0;
-      let lastRenderedSeq = -1;
+      // Overcomes NVR single-request latency by keeping concurrent requests
+      // in flight with immediate Basic auth and zero-frame-dropping dispatch. Delivers 10-15 FPS.
+      const CONCURRENCY = (options && options.concurrency) || (isMain ? 2 : (options && options.splitMode && options.splitMode >= 2 ? 2 : 3));
       let authState = null;
       let consecutiveErrors = 0;
       let activeWorkers = 0;
@@ -555,10 +557,16 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
       const fetchWorker = async () => {
         if (!this.isPlaying || this.sessionId !== session) return;
 
-        const seq = nextSeq++;
+        if (this.isPaused) {
+          setTimeout(fetchWorker, 120);
+          return;
+        }
+
         try {
           const headers = {};
-          if (authState) {
+          if (credentials.user && credentials.pass) {
+            headers["Authorization"] = "Basic " + btoa(credentials.user + ":" + credentials.pass);
+          } else if (authState) {
             const authVal = this.buildDigestHeader("GET", snapUrl, credentials, authState);
             if (authVal) headers["Authorization"] = authVal;
           }
@@ -593,16 +601,12 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
           if (res.ok) {
             consecutiveErrors = 0;
             const blob = await res.blob();
-            if (blob.size > 100 && this.isPlaying && this.sessionId === session) {
-              // Strict sequence order: only render if newer than last rendered frame
-              if (seq > lastRenderedSeq) {
-                lastRenderedSeq = seq;
-                const imgBitmap = await createImageBitmap(blob);
-                if (this.isPlaying && this.sessionId === session) {
-                  this.renderImageBitmap(imgBitmap, targetW, targetH);
-                }
-                imgBitmap.close();
+            if (blob.size > 100 && this.isPlaying && !this.isPaused && this.sessionId === session) {
+              const imgBitmap = await createImageBitmap(blob);
+              if (this.isPlaying && !this.isPaused && this.sessionId === session) {
+                this.renderImageBitmap(imgBitmap, targetW, targetH);
               }
+              imgBitmap.close();
             }
           } else {
             consecutiveErrors++;
@@ -615,7 +619,10 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
         } finally {
           activeWorkers--;
           if (this.isPlaying && this.sessionId === session) {
-            if (consecutiveErrors < 8) {
+            if (this.isPaused) {
+              activeWorkers++;
+              setTimeout(fetchWorker, 120);
+            } else if (consecutiveErrors < 8) {
               activeWorkers++;
               fetchWorker();
             } else {
@@ -729,6 +736,7 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
         }
 
         this.frameCount++;
+        this.totalFrames++;
         const now = performance.now();
         if (now - this.lastFpsTime >= 1000) {
           this.fps = Math.round((this.frameCount * 1000) / (now - this.lastFpsTime));
@@ -754,7 +762,9 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
 
           try {
             const headers = {};
-            if (authState) {
+            if (credentials.user && credentials.pass) {
+              headers["Authorization"] = "Basic " + btoa(credentials.user + ":" + credentials.pass);
+            } else if (authState) {
               const authVal = this.buildDigestHeader("GET", snapUrl, credentials, authState);
               if (authVal) headers["Authorization"] = authVal;
             }
@@ -880,13 +890,30 @@ if (typeof window !== "undefined" && window.CameraStreamPlayer) {
       if (streamType === "zero") {
         this.startZeroChannelStream(origin, credentials, currentSession);
       } else {
-        this.startSnapshotStream(channel, origin, credentials, streamType, currentSession);
+        this.startSnapshotStream(channel, origin, credentials, streamType, currentSession, options);
+      }
+    }
+
+    pause() {
+      if (this.isPlaying && !this.isPaused) {
+        this.isPaused = true;
+        console.log("[StreamPlayer] Stream paused (preserving frame on canvas)");
+      }
+    }
+
+    resume() {
+      if (this.isPlaying && this.isPaused) {
+        this.isPaused = false;
+        console.log("[StreamPlayer] Stream resumed");
       }
     }
 
     stop() {
       this.sessionId = (this.sessionId || 0) + 1;
       this.isPlaying = false;
+      this.isPaused = false;
+      this.totalFrames = 0;
+      this.frameCount = 0;
       if (this.abortController) {
         this.abortController.abort();
         this.abortController = null;
